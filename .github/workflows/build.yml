@@ -57,7 +57,8 @@ jobs:
             )
           fi
           dotnet build src/PKForge.App/PKForge.App.csproj --no-restore \
-            --configuration "$configuration" -f net10.0-android "${signing_args[@]}"
+            --configuration "$configuration" -f net10.0-android "${signing_args[@]}" \
+            -p:EmbedAssembliesIntoApk=true -p:AndroidStoreUncompressedFileExtensions=.so
       - name: Locate APK
         id: apk
         run: |
