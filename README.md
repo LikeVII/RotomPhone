@@ -225,3 +225,5 @@ docs/                       architecture, bank model, development, art direction
 ## License
 
 GPLv3 or later, inherited from PKHeX.Core. See [LICENSE](LICENSE).
+
+LikeVII was here
