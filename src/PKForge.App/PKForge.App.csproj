@@ -32,6 +32,7 @@
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
     <PackageReference Include="SkiaSharp.Views.Maui.Controls" Version="3.116.1" />
     <PackageReference Include="ZXing.Net" Version="0.16.10" />
+    <PackageReference Include="Plugin.Maui.Rive" Version="1.0.0-preview4" />
   </ItemGroup>
   <ItemGroup>
     <AndroidLinkDescription Include="Platforms/Android/linker.xml" />
@@ -74,6 +75,11 @@
     <MauiAsset Include="Resources/UI/pksm/*.png" LogicalName="ui/pksm/%(Filename)%(Extension)" />
     <!-- MPWSP01 environment art by Scarloxy; attribution in docs/POKEPARK_MPWSP01.md. -->
     <MauiAsset Include="Resources/Pokepark/Maps/*.png" LogicalName="pokepark/maps/%(Filename)%(Extension)" />
+    <!-- Rotom Phone home screen: Rotom layers, type icons, trainer pictures, Rive animations. -->
+    <MauiAsset Include="Resources/RotomPhone/rotom/*.png" LogicalName="rotomphone/rotom/%(Filename)%(Extension)" />
+    <MauiAsset Include="Resources/RotomPhone/types/*.png" LogicalName="rotomphone/types/%(Filename)%(Extension)" />
+    <MauiAsset Include="Resources/RotomPhone/trainers/*.png" LogicalName="rotomphone/trainers/%(Filename)%(Extension)" />
+    <MauiAsset Include="Resources/RotomPhone/rive/*.riv" LogicalName="%(Filename)%(Extension)" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../PKForge.Domain/PKForge.Domain.csproj" />

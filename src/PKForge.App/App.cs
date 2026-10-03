@@ -59,14 +59,16 @@ public sealed class App : Application
         {
             var services = IPlatformApplication.Current?.Services
                 ?? throw new InvalidOperationException("MAUI services are unavailable.");
-            Trace("resolving HomePage");
-            var page = services.GetRequiredService<Views.HomePage>();
-            Trace("HomePage resolved");
-            return new Window(new NavigationPage(page)
+            Trace("resolving RotomHomePage");
+            var page = services.GetRequiredService<Views.RotomHomePage>();
+            Trace("RotomHomePage resolved");
+            var nav = new NavigationPage(page)
             {
                 BarBackgroundColor = Theme.UiTokens.Navy1,
                 BarTextColor = Colors.White,
-            });
+            };
+            NavigationPage.SetHasNavigationBar(page, false);
+            return new Window(nav);
         }
         catch (Exception error)
         {
