@@ -9,7 +9,7 @@
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <ApplicationId>org.pkforge.app</ApplicationId>
-    <ApplicationTitle>PKForge</ApplicationTitle>
+    <ApplicationTitle>Rotom Phone</ApplicationTitle>
     <ApplicationVersion>303</ApplicationVersion>
     <ApplicationDisplayVersion>3.0.3</ApplicationDisplayVersion>
     <RuntimeIdentifiers>android-arm64</RuntimeIdentifiers>
