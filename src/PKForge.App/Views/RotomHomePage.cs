@@ -19,9 +19,6 @@ public sealed class RotomHomePage : ContentPage
     private const int BubbleMs = 15000;
     private const int HoldMs = 550;
     private const float BackgroundSpeed = 0.6f;
-    // The eyes animation (rotom_intro_eyes.riv) is a 500 x 500 artboard whose eyes sit 154 units below
-    // its top and about 50 units in from its left: that puts its top-left corner at (211, -60) in design units.
-    private const float EyesArtboardX = 211f, EyesArtboardY = -60f, EyesArtboardSize = 500f;
     private const float PokemonPad = 70f;
 
     private static readonly SKRect RotomRect = new(-97f, 143.5f, -97f + 1116.5f, 143.5f + 383.5f);
@@ -39,9 +36,7 @@ public sealed class RotomHomePage : ContentPage
     private readonly SKCanvasView _top;
     private readonly SKCanvasView _bottom;
     private RiveAnimationView? _rive;
-    private RiveAnimationView? _eyesRive;
     private readonly SKCanvasView _touch;
-    private long _nextEyesPlay;
     private readonly Grid _menu;
     private readonly Border _menuPanel;
     private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
@@ -96,9 +91,8 @@ public sealed class RotomHomePage : ContentPage
         _root.Add(_bottom);
         _top = new SKCanvasView { InputTransparent = true };
         _top.PaintSurface += OnPaintTop;
-        _top.SizeChanged += (_, _) => PositionEyes();
         _root.Add(_top);
-        // An invisible layer above everything receives the touches, so the eyes animation never swallows one.
+        // An invisible layer above everything receives the touches.
         _touch = new SKCanvasView { EnableTouchEvents = true };
         _touch.Touch += OnTouch;
         _root.Add(_touch);
@@ -163,57 +157,15 @@ public sealed class RotomHomePage : ContentPage
         {
             Services.AppLog.Warn("rotom", $"Rive background unavailable: {error.Message}");
         }
-
-        // Rotom's eyes: the Rive animation replaces the two still pictures. It sits above the drawn Rotom.
-        try
-        {
-            var eyes = new RiveAnimationView
-            {
-                ResourceName = "rotom_intro_eyes",
-                AutoPlay = true,
-                Fit = RiveFitMode.Contain,
-                RiveAlignment = RiveAlignmentMode.Center,
-                InputTransparent = true,
-                HorizontalOptions = LayoutOptions.Start,
-                VerticalOptions = LayoutOptions.Start,
-            };
-            _root.Insert(_root.Children.IndexOf(_touch), eyes);
-            _eyesRive = eyes;
-            _nextEyesPlay = _clock.ElapsedMilliseconds + 3500;
-            PositionEyes();
-        }
-        catch (Exception error)
-        {
-            Services.AppLog.Warn("rotom", $"Rive eyes unavailable: {error.Message}");
-        }
-    }
-
-    /// <summary>Puts the eyes animation exactly over Rotom's eyes, whatever the phone's size.</summary>
-    private void PositionEyes()
-    {
-        var eyes = _eyesRive;
-        if (eyes is null || _top.Width <= 0 || _top.CanvasSize.Width <= 0) return;
-        ComputeLayout(new SKImageInfo((int)_top.CanvasSize.Width, (int)_top.CanvasSize.Height));
-        var density = _top.CanvasSize.Width / (float)_top.Width;
-        var unit = _scale / density;
-        eyes.WidthRequest = EyesArtboardSize * unit;
-        eyes.HeightRequest = EyesArtboardSize * unit;
-        eyes.TranslationX = _offX / density + EyesArtboardX * unit;
-        eyes.TranslationY = EyesArtboardY * unit;
     }
 
     private void DetachRive()
     {
         var rive = _rive;
-        var eyes = _eyesRive;
         _rive = null;
-        _eyesRive = null;
-        foreach (var view in new[] { rive, eyes })
-        {
-            if (view is null) continue;
-            try { _root.Remove(view); }
-            catch (Exception error) { Services.AppLog.Warn("rotom", $"Rive removal failed: {error.Message}"); }
-        }
+        if (rive is null) return;
+        try { _root.Remove(rive); }
+        catch (Exception error) { Services.AppLog.Warn("rotom", $"Rive removal failed: {error.Message}"); }
     }
 
     private void ApplyBackgroundSpeed()
@@ -287,17 +239,8 @@ public sealed class RotomHomePage : ContentPage
         var now = _clock.ElapsedMilliseconds;
         var dirty = false;
 
-        // Blinking: the Rive eyes play their animation again every few seconds; the still pictures are the fallback.
-        if (_eyesRive is not null)
-        {
-            if (now >= _nextEyesPlay)
-            {
-                _nextEyesPlay = now + 3000 + _random.Next(2500);
-                try { _eyesRive.Play("Timeline 1", RiveLoopMode.OneShot); }
-                catch (Exception error) { Services.AppLog.Warn("rotom", $"Eyes replay failed: {error.Message}"); }
-            }
-        }
-        else if (_eyesClosed && now >= _eyesReopen) { _eyesClosed = false; _nextBlink = now + 2500 + _random.Next(3000); dirty = true; }
+        // Blinking: eyes closed for a moment every few seconds.
+        if (_eyesClosed && now >= _eyesReopen) { _eyesClosed = false; _nextBlink = now + 2500 + _random.Next(3000); dirty = true; }
         else if (!_eyesClosed && now >= _nextBlink) { _eyesClosed = true; _eyesReopen = now + 140; dirty = true; }
 
         // The yellow box: speaking mouth while it is shown, then it goes away after 15 s.
@@ -380,7 +323,7 @@ public sealed class RotomHomePage : ContentPage
     {
         DrawImage(c, "rotomphone/rotom/rotom_base.png", RotomRect);
 
-        var eyes = _eyesRive is not null ? null : RotomAssets.Get(_eyesClosed ? "rotomphone/rotom/rotom_eyes_closed.png" : "rotomphone/rotom/rotom_eyes_open.png");
+        var eyes = RotomAssets.Get(_eyesClosed ? "rotomphone/rotom/rotom_eyes_closed.png" : "rotomphone/rotom/rotom_eyes_open.png");
         if (eyes is not null) c.DrawImage(eyes, At(262f, 94f, eyes), new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
 
         if (_mouthOpen)
@@ -624,7 +567,8 @@ public sealed class RotomHomePage : ContentPage
         // Only the white info screen opens the profile.
         if (new SKRect(211f, 279f, 711f, 390f).Contains(t)) return Target.Profile;
         // The right half of the dark layer swaps in another Pokémon of the Bank.
-        if (t.X >= DesignW / 2f && t.Y >= 0f && t.Y <= 390f) return Target.NextMon;
+        // (the right flap, from about x 725 down, is not part of it)
+        if (t.X >= DesignW / 2f && t.Y >= 0f && t.Y <= 390f && !(t.X >= 725f && t.Y >= 190f)) return Target.NextMon;
         if (_entry is not null && PokemonBox.Contains(ToDesignBottom(pixel))) return Target.Pokemon;
         return Target.None;
     }
