@@ -44,7 +44,9 @@ public static class RotomAssets
             using var stream = FileSystem.OpenAppPackageFileAsync(name).GetAwaiter().GetResult();
             using var bytes = new MemoryStream();
             stream.CopyTo(bytes);
-            image = SKImage.FromEncodedData(bytes.ToArray());
+            // Decoded to pixels once: a lazily decoded picture would be decoded again on every repaint.
+            using var encoded = SKImage.FromEncodedData(bytes.ToArray());
+            image = encoded?.ToRasterImage();
         }
         catch (Exception)
         {

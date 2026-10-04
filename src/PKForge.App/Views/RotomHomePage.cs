@@ -19,13 +19,16 @@ public sealed class RotomHomePage : ContentPage
     private const int BubbleMs = 15000;
     private const int HoldMs = 550;
     private const float BackgroundSpeed = 0.6f;
+    // The eyes animation (rotom_intro_eyes.riv) is a 500 x 500 artboard whose eyes sit 154 units below
+    // its top and about 50 units in from its left: that puts its top-left corner at (211, -60) in design units.
+    private const float EyesArtboardX = 211f, EyesArtboardY = -60f, EyesArtboardSize = 500f;
     private const float PokemonPad = 70f;
 
     private static readonly SKRect RotomRect = new(-97f, 143.5f, -97f + 1116.5f, 143.5f + 383.5f);
     private static readonly SKRect PokemonBox = new(-35f, 727f, -35f + 973f, 727f + 973f);
     private static readonly SKColor InkGrey = SKColor.Parse("#7a7b76");
 
-    private enum Target { None, Handle, LeftFlap, Profile, Pokemon }
+    private enum Target { None, Handle, LeftFlap, Profile, NextMon, Pokemon }
 
     private sealed record BubbleInfo(string Number, string Name, IReadOnlyList<int> Types, IReadOnlyList<string> Lines, int Ball);
 
@@ -36,6 +39,9 @@ public sealed class RotomHomePage : ContentPage
     private readonly SKCanvasView _top;
     private readonly SKCanvasView _bottom;
     private RiveAnimationView? _rive;
+    private RiveAnimationView? _eyesRive;
+    private readonly SKCanvasView _touch;
+    private long _nextEyesPlay;
     private readonly Grid _menu;
     private readonly Border _menuPanel;
     private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
@@ -88,10 +94,14 @@ public sealed class RotomHomePage : ContentPage
         _bottom = new SKCanvasView { InputTransparent = true };
         _bottom.PaintSurface += OnPaintBottom;
         _root.Add(_bottom);
-        _top = new SKCanvasView { EnableTouchEvents = true };
+        _top = new SKCanvasView { InputTransparent = true };
         _top.PaintSurface += OnPaintTop;
-        _top.Touch += OnTouch;
+        _top.SizeChanged += (_, _) => PositionEyes();
         _root.Add(_top);
+        // An invisible layer above everything receives the touches, so the eyes animation never swallows one.
+        _touch = new SKCanvasView { EnableTouchEvents = true };
+        _touch.Touch += OnTouch;
+        _root.Add(_touch);
 
         _menuPanel = new Border();
         _menu = BuildMenu();
@@ -153,15 +163,57 @@ public sealed class RotomHomePage : ContentPage
         {
             Services.AppLog.Warn("rotom", $"Rive background unavailable: {error.Message}");
         }
+
+        // Rotom's eyes: the Rive animation replaces the two still pictures. It sits above the drawn Rotom.
+        try
+        {
+            var eyes = new RiveAnimationView
+            {
+                ResourceName = "rotom_intro_eyes",
+                AutoPlay = true,
+                Fit = RiveFitMode.Contain,
+                RiveAlignment = RiveAlignmentMode.Center,
+                InputTransparent = true,
+                HorizontalOptions = LayoutOptions.Start,
+                VerticalOptions = LayoutOptions.Start,
+            };
+            _root.Insert(_root.Children.IndexOf(_touch), eyes);
+            _eyesRive = eyes;
+            _nextEyesPlay = _clock.ElapsedMilliseconds + 3500;
+            PositionEyes();
+        }
+        catch (Exception error)
+        {
+            Services.AppLog.Warn("rotom", $"Rive eyes unavailable: {error.Message}");
+        }
+    }
+
+    /// <summary>Puts the eyes animation exactly over Rotom's eyes, whatever the phone's size.</summary>
+    private void PositionEyes()
+    {
+        var eyes = _eyesRive;
+        if (eyes is null || _top.Width <= 0 || _top.CanvasSize.Width <= 0) return;
+        ComputeLayout(new SKImageInfo((int)_top.CanvasSize.Width, (int)_top.CanvasSize.Height));
+        var density = _top.CanvasSize.Width / (float)_top.Width;
+        var unit = _scale / density;
+        eyes.WidthRequest = EyesArtboardSize * unit;
+        eyes.HeightRequest = EyesArtboardSize * unit;
+        eyes.TranslationX = _offX / density + EyesArtboardX * unit;
+        eyes.TranslationY = EyesArtboardY * unit;
     }
 
     private void DetachRive()
     {
         var rive = _rive;
+        var eyes = _eyesRive;
         _rive = null;
-        if (rive is null) return;
-        try { _root.Remove(rive); }
-        catch (Exception error) { Services.AppLog.Warn("rotom", $"Rive background removal failed: {error.Message}"); }
+        _eyesRive = null;
+        foreach (var view in new[] { rive, eyes })
+        {
+            if (view is null) continue;
+            try { _root.Remove(view); }
+            catch (Exception error) { Services.AppLog.Warn("rotom", $"Rive removal failed: {error.Message}"); }
+        }
     }
 
     private void ApplyBackgroundSpeed()
@@ -235,8 +287,17 @@ public sealed class RotomHomePage : ContentPage
         var now = _clock.ElapsedMilliseconds;
         var dirty = false;
 
-        // Blinking: eyes closed for a moment every few seconds.
-        if (_eyesClosed && now >= _eyesReopen) { _eyesClosed = false; _nextBlink = now + 2500 + _random.Next(3000); dirty = true; }
+        // Blinking: the Rive eyes play their animation again every few seconds; the still pictures are the fallback.
+        if (_eyesRive is not null)
+        {
+            if (now >= _nextEyesPlay)
+            {
+                _nextEyesPlay = now + 3000 + _random.Next(2500);
+                try { _eyesRive.Play("Timeline 1", RiveLoopMode.OneShot); }
+                catch (Exception error) { Services.AppLog.Warn("rotom", $"Eyes replay failed: {error.Message}"); }
+            }
+        }
+        else if (_eyesClosed && now >= _eyesReopen) { _eyesClosed = false; _nextBlink = now + 2500 + _random.Next(3000); dirty = true; }
         else if (!_eyesClosed && now >= _nextBlink) { _eyesClosed = true; _eyesReopen = now + 140; dirty = true; }
 
         // The yellow box: speaking mouth while it is shown, then it goes away after 15 s.
@@ -297,9 +358,8 @@ public sealed class RotomHomePage : ContentPage
         c.Save();
         c.Translate(_offX, 0);
         c.Scale(_scale);
-        // The dark layer sits behind Rotom: it dims the Pokémon, never the Rotom shape.
-        if (_bubbleAlpha > 0.01f)
-            DrawImage(c, "rotomphone/rotom/black_square.png", new SKRect(_designLeft, 0, _designRight, 390), _bubbleAlpha);
+        // The dark layer is always there, behind Rotom: it dims the Pokémon, never the Rotom shape.
+        DrawImage(c, "rotomphone/rotom/black_square.png", new SKRect(_designLeft, 0, _designRight, 390));
         DrawRotom(c);
         DrawBubble(c);
         c.Restore();
@@ -310,7 +370,7 @@ public sealed class RotomHomePage : ContentPage
         var image = RotomAssets.Get(name);
         if (image is null) return;
         using var paint = new SKPaint { IsAntialias = true, Color = SKColors.White.WithAlpha((byte)(alpha * 255)) };
-        c.DrawImage(image, dest, new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear), paint);
+        c.DrawImage(image, dest, new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None), paint);
     }
 
     private static SKRect At(float x, float y, SKImage? image, float scale = 0.5f) =>
@@ -320,18 +380,18 @@ public sealed class RotomHomePage : ContentPage
     {
         DrawImage(c, "rotomphone/rotom/rotom_base.png", RotomRect);
 
-        var eyes = RotomAssets.Get(_eyesClosed ? "rotomphone/rotom/rotom_eyes_closed.png" : "rotomphone/rotom/rotom_eyes_open.png");
-        if (eyes is not null) c.DrawImage(eyes, At(262f, 94f, eyes), new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear));
+        var eyes = _eyesRive is not null ? null : RotomAssets.Get(_eyesClosed ? "rotomphone/rotom/rotom_eyes_closed.png" : "rotomphone/rotom/rotom_eyes_open.png");
+        if (eyes is not null) c.DrawImage(eyes, At(262f, 94f, eyes), new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
 
         if (_mouthOpen)
         {
             var open = RotomAssets.Get("rotomphone/rotom/rotom_mouth_open.png");
-            if (open is not null) c.DrawImage(open, At(412f, 199f, open), new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear));
+            if (open is not null) c.DrawImage(open, At(412f, 199f, open), new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
         }
         else
         {
             var closed = RotomAssets.Get("rotomphone/rotom/rotom_mouth_closed.png");
-            if (closed is not null) c.DrawImage(closed, At(414.5f, 239.5f, closed), new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear));
+            if (closed is not null) c.DrawImage(closed, At(414.5f, 239.5f, closed), new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
         }
 
         DrawAvatar(c);
@@ -366,7 +426,7 @@ public sealed class RotomHomePage : ContentPage
             // The head of the trainer sprite fills the circle.
             var side = Math.Min(picture.Width, picture.Height * 0.85f);
             var src = new SKRect((picture.Width - side) / 2f, 0f, (picture.Width + side) / 2f, side);
-            c.DrawImage(picture, src, circle, new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear));
+            c.DrawImage(picture, src, circle, new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
         }
         c.Restore();
         using var ring = new SKPaint { Color = SKColor.Parse("#91EBE9"), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 5f };
@@ -465,7 +525,7 @@ public sealed class RotomHomePage : ContentPage
         var w = image.Width * fit;
         var h = image.Height * fit;
         var dest = new SKRect(PokemonBox.MidX - w / 2f, PokemonBox.Bottom - h, PokemonBox.MidX + w / 2f, PokemonBox.Bottom);
-        var sampling = pixelArt ? new SKSamplingOptions(SKFilterMode.Nearest) : new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
+        var sampling = pixelArt ? new SKSamplingOptions(SKFilterMode.Nearest) : new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None);
 
         // The shadow, outline and picture are composed once; repainting then costs one draw.
         if (_pokeCache is null || !ReferenceEquals(_pokeCacheSource, bitmap) || Math.Abs(_pokeCacheScale - _scale) > 0.001f)
@@ -490,7 +550,7 @@ public sealed class RotomHomePage : ContentPage
         if (_pokeCache is null) return;
         c.DrawImage(_pokeCache,
             new SKRect(PokemonBox.Left - PokemonPad, PokemonBox.Top - PokemonPad, PokemonBox.Right + PokemonPad, PokemonBox.Bottom + PokemonPad),
-            new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear));
+            new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
     }
 
     private static void ComposePokemon(SKCanvas c, SKImage image, SKRect dest, SKSamplingOptions sampling)
@@ -523,7 +583,21 @@ public sealed class RotomHomePage : ContentPage
     private static SKPaint Ink(SKColor color) => new() { Color = color, IsAntialias = true };
 
     /// <summary>Shrinks (down to <paramref name="min"/>) then ellipsizes text to fit a width in design units.</summary>
+    private static readonly Dictionary<(string, float, float, float), (string Text, float Size)> FitMemo = new();
+    private static SKTypeface? _fitFace;
+
     private static string Fit(SKFont probe, string text, float width, float size, float min, out float fitted)
+    {
+        if (!ReferenceEquals(_fitFace, probe.Typeface)) { FitMemo.Clear(); _fitFace = probe.Typeface; }
+        var key = (text, width, size, min);
+        if (FitMemo.TryGetValue(key, out var known)) { fitted = known.Size; return known.Text; }
+        if (FitMemo.Count > 200) FitMemo.Clear();
+        var result = FitCompute(probe, text, width, size, min, out fitted);
+        FitMemo[key] = (result, fitted);
+        return result;
+    }
+
+    private static string FitCompute(SKFont probe, string text, float width, float size, float min, out float fitted)
     {
         fitted = size;
         using var font = new SKFont(probe.Typeface, size);
@@ -549,6 +623,8 @@ public sealed class RotomHomePage : ContentPage
         if (new SKRect(-130f, 180f, 125f, 530f).Contains(t)) return Target.LeftFlap;
         // Only the white info screen opens the profile.
         if (new SKRect(211f, 279f, 711f, 390f).Contains(t)) return Target.Profile;
+        // The right half of the dark layer swaps in another Pokémon of the Bank.
+        if (t.X >= DesignW / 2f && t.Y >= 0f && t.Y <= 390f) return Target.NextMon;
         if (_entry is not null && PokemonBox.Contains(ToDesignBottom(pixel))) return Target.Pokemon;
         return Target.None;
     }
@@ -616,11 +692,25 @@ public sealed class RotomHomePage : ContentPage
         {
             case Target.LeftFlap: ShowBubble(); break;
             case Target.Profile: _ = OpenAsync<RotomProfilePage>(); break;
+            case Target.NextMon: ShowAnotherPokemon(); break;
             case Target.Pokemon:
                 // The cry plays here once a cry source is chosen; for now a short tick tells the tap landed.
                 try { HapticFeedback.Default.Perform(HapticFeedbackType.Click); } catch (Exception) { /* no vibrator */ }
                 break;
         }
+    }
+
+    private void ShowAnotherPokemon()
+    {
+        var all = _bank.GetAll();
+        if (all.Count < 2) return;
+        BankEntry next;
+        do { next = all[_random.Next(all.Count)]; } while (next.Id == _entry?.Id);
+        _entry = next;
+        _bubble = null;
+        try { HapticFeedback.Default.Perform(HapticFeedbackType.Click); } catch (Exception) { /* no vibrator */ }
+        if (_bubbleUntil > _clock.ElapsedMilliseconds) ShowBubble();
+        InvalidateAll();
     }
 
     // ── The yellow box ───────────────────────────────────────────────────────
