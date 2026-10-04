@@ -582,7 +582,7 @@ public sealed class RotomHomePage : ContentPage
 
     private static SKPaint Ink(SKColor color) => new() { Color = color, IsAntialias = true };
 
-    /// <summary>Shrinks (down to <paramref name="min"/>) then ellipsizes text to fit a width in design units.</summary>
+    // Shrinks (down to a minimum size) then ellipsizes text to fit a width in design units; results are remembered.
     private static readonly Dictionary<(string, float, float, float), (string Text, float Size)> FitMemo = new();
     private static SKTypeface? _fitFace;
 
