@@ -6,6 +6,7 @@ using PKForge.App.Views;
 using PKForge.Domain;
 using PKForge.Engine;
 using PKForge.Infrastructure;
+using Plugin.Maui.Rive;
 using SkiaSharp.Views.Maui.Controls.Hosting;
 
 namespace PKForge.App;
@@ -21,7 +22,7 @@ public static class MauiProgram
 #if ANDROID
         Views.CapsuleSkin.Register();
 #endif
-        builder.UseMauiApp<App>().UseSkiaSharp()
+        builder.UseMauiApp<App>().UseSkiaSharp().UseRive()
             .ConfigureFonts(fonts =>
             {
                 fonts.AddFont("MPLUSRounded1c-Regular.ttf", "Rounded");
@@ -30,6 +31,7 @@ public static class MauiProgram
                 // The DS-menu voice: NDS12, a recreation of the Nintendo DS system font.
                 // Best displayed at font-size 16 or multiples (it is a pixel font).
                 fonts.AddFont("NDS12.ttf", "PixelUI");
+                fonts.AddFont("FOT-UDKakugo.ttf", "RotomUI");
             });
         builder.Services.AddSingleton<ISaveEngine, SaveEngine>();
         builder.Services.AddSingleton<IGameDataService, GameDataService>();
@@ -101,6 +103,8 @@ public static class MauiProgram
         builder.Services.AddTransient<BackupHistoryPage>();
         builder.Services.AddSingleton<SavePickerViewModel>();
         builder.Services.AddTransient<HomePage>();
+        builder.Services.AddTransient<RotomHomePage>();
+        builder.Services.AddTransient<RotomProfilePage>();
         builder.Services.AddTransient<SecondScreenBoxPage>();
         builder.Services.AddTransient<BankPage>();
         App.Trace("builder.Build()");
