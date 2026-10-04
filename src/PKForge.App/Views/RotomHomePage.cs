@@ -298,10 +298,52 @@ public sealed class RotomHomePage : ContentPage
         c.Translate(_offX, 0);
         c.Scale(_scale);
         // The dark layer is always there, behind Rotom: it dims the Pokémon, never the Rotom shape.
-        DrawImage(c, "rotomphone/rotom/black_square.png", new SKRect(_designLeft, 0, _designRight, 390));
+        // The dark layer and the Rotom shape are big pictures: they are scaled once into a cache,
+        // so each animation frame only copies them.
+        var baseRect = new SKRect(_designLeft, 0, _designRight, RotomRect.Bottom);
+        var designLeft = _designLeft;
+        var designRight = _designRight;
+        var layer = Cached(ref _baseCache, ref _baseKey, baseRect,
+            ["rotomphone/rotom/black_square.png", "rotomphone/rotom/rotom_base.png"],
+            sc =>
+            {
+                DrawImage(sc, "rotomphone/rotom/black_square.png", new SKRect(designLeft, 0, designRight, 390));
+                DrawImage(sc, "rotomphone/rotom/rotom_base.png", RotomRect);
+            });
+        if (layer is not null)
+            c.DrawImage(layer, baseRect, new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
         DrawRotom(c);
         DrawBubble(c);
         c.Restore();
+    }
+
+    private SKImage? _baseCache, _shellCache;
+    private string _baseKey = "", _shellKey = "";
+
+    /// <summary>Draws a layer once at the current size into a picture and keeps it until the size changes.</summary>
+    private SKImage? Cached(ref SKImage? cache, ref string key, SKRect design, string[] assets, Action<SKCanvas> draw)
+    {
+        foreach (var asset in assets)
+            if (RotomAssets.Get(asset) is null) return null;
+        var wanted = $"{_scale:F4}|{design.Left:F1}|{design.Right:F1}";
+        if (cache is null || key != wanted)
+        {
+            cache?.Dispose();
+            cache = null;
+            var width = (int)MathF.Ceiling(design.Width * _scale);
+            var height = (int)MathF.Ceiling(design.Height * _scale);
+            if (width <= 0 || height <= 0) return null;
+            using var surface = SKSurface.Create(new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul));
+            if (surface is null) return null;
+            var sc = surface.Canvas;
+            sc.Clear(SKColors.Transparent);
+            sc.Scale(width / design.Width, height / design.Height);
+            sc.Translate(-design.Left, -design.Top);
+            draw(sc);
+            cache = surface.Snapshot();
+            key = wanted;
+        }
+        return cache;
     }
 
     private static void DrawImage(SKCanvas c, string name, SKRect dest, float alpha = 1f)
@@ -309,7 +351,7 @@ public sealed class RotomHomePage : ContentPage
         var image = RotomAssets.Get(name);
         if (image is null) return;
         using var paint = new SKPaint { IsAntialias = true, Color = SKColors.White.WithAlpha((byte)(alpha * 255)) };
-        c.DrawImage(image, dest, new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear), paint);
+        c.DrawImage(image, dest, new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None), paint);
     }
 
     private static SKRect At(float x, float y, SKImage? image, float scale = 0.5f) =>
@@ -317,20 +359,18 @@ public sealed class RotomHomePage : ContentPage
 
     private void DrawRotom(SKCanvas c)
     {
-        DrawImage(c, "rotomphone/rotom/rotom_base.png", RotomRect);
-
         var eyes = RotomAssets.Get(_eyesClosed ? "rotomphone/rotom/rotom_eyes_closed.png" : "rotomphone/rotom/rotom_eyes_open.png");
-        if (eyes is not null) c.DrawImage(eyes, At(262f, 94f, eyes), new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear));
+        if (eyes is not null) c.DrawImage(eyes, At(262f, 94f, eyes), new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
 
         if (_mouthOpen)
         {
             var open = RotomAssets.Get("rotomphone/rotom/rotom_mouth_open.png");
-            if (open is not null) c.DrawImage(open, At(412f, 199f, open), new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear));
+            if (open is not null) c.DrawImage(open, At(412f, 199f, open), new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
         }
         else
         {
             var closed = RotomAssets.Get("rotomphone/rotom/rotom_mouth_closed.png");
-            if (closed is not null) c.DrawImage(closed, At(414.5f, 239.5f, closed), new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear));
+            if (closed is not null) c.DrawImage(closed, At(414.5f, 239.5f, closed), new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
         }
 
         DrawAvatar(c);
@@ -365,7 +405,7 @@ public sealed class RotomHomePage : ContentPage
             // The head of the trainer sprite fills the circle.
             var side = Math.Min(picture.Width, picture.Height * 0.85f);
             var src = new SKRect((picture.Width - side) / 2f, 0f, (picture.Width + side) / 2f, side);
-            c.DrawImage(picture, src, circle, new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear));
+            c.DrawImage(picture, src, circle, new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
         }
         c.Restore();
         using var ring = new SKPaint { Color = SKColor.Parse("#91EBE9"), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 5f };
@@ -376,7 +416,14 @@ public sealed class RotomHomePage : ContentPage
     {
         if (_bubbleAlpha <= 0.01f || _bubble is null) return;
         var a = _bubbleAlpha;
-        DrawImage(c, "rotomphone/rotom/bubble_shell.png", new SKRect(65f, 455f, 65f + 375f, 455f + 426f), a);
+        var shellRect = new SKRect(65f, 455f, 65f + 375f, 455f + 426f);
+        var shell = Cached(ref _shellCache, ref _shellKey, shellRect, ["rotomphone/rotom/bubble_shell.png"],
+            sc => DrawImage(sc, "rotomphone/rotom/bubble_shell.png", shellRect));
+        if (shell is not null)
+        {
+            using var shellPaint = new SKPaint { Color = SKColors.White.WithAlpha((byte)(a * 255)) };
+            c.DrawImage(shell, shellRect, new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None), shellPaint);
+        }
 
         var alpha = (byte)(a * 255);
         using var black = new SKPaint { Color = SKColors.Black.WithAlpha(alpha), IsAntialias = true };
@@ -464,7 +511,7 @@ public sealed class RotomHomePage : ContentPage
         var w = image.Width * fit;
         var h = image.Height * fit;
         var dest = new SKRect(PokemonBox.MidX - w / 2f, PokemonBox.Bottom - h, PokemonBox.MidX + w / 2f, PokemonBox.Bottom);
-        var sampling = pixelArt ? new SKSamplingOptions(SKFilterMode.Nearest) : new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
+        var sampling = pixelArt ? new SKSamplingOptions(SKFilterMode.Nearest) : new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None);
 
         // The shadow, outline and picture are composed once; repainting then costs one draw.
         if (_pokeCache is null || !ReferenceEquals(_pokeCacheSource, bitmap) || Math.Abs(_pokeCacheScale - _scale) > 0.001f)
@@ -489,7 +536,7 @@ public sealed class RotomHomePage : ContentPage
         if (_pokeCache is null) return;
         c.DrawImage(_pokeCache,
             new SKRect(PokemonBox.Left - PokemonPad, PokemonBox.Top - PokemonPad, PokemonBox.Right + PokemonPad, PokemonBox.Bottom + PokemonPad),
-            new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear));
+            new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
     }
 
     private static void ComposePokemon(SKCanvas c, SKImage image, SKRect dest, SKSamplingOptions sampling)
@@ -521,8 +568,23 @@ public sealed class RotomHomePage : ContentPage
 
     private static SKPaint Ink(SKColor color) => new() { Color = color, IsAntialias = true };
 
-    /// <summary>Shrinks (down to <paramref name="min"/>) then ellipsizes text to fit a width in design units.</summary>
+    // Shrinks (down to a minimum size) then ellipsizes text to fit a width in design units; results are remembered.
+    private static readonly Dictionary<(string, float, float, float), (string Text, float Size)> FitMemo = new();
+    private static SKTypeface? _fitFace;
+
     private static string Fit(SKFont probe, string text, float width, float size, float min, out float fitted)
+    {
+        var face = RotomFont.Face;
+        if (!ReferenceEquals(_fitFace, face)) { FitMemo.Clear(); _fitFace = face; }
+        var key = (text, width, size, min);
+        if (FitMemo.TryGetValue(key, out var known)) { fitted = known.Size; return known.Text; }
+        if (FitMemo.Count > 200) FitMemo.Clear();
+        var result = FitCompute(probe, text, width, size, min, out fitted);
+        FitMemo[key] = (result, fitted);
+        return result;
+    }
+
+    private static string FitCompute(SKFont probe, string text, float width, float size, float min, out float fitted)
     {
         fitted = size;
         using var font = new SKFont(probe.Typeface, size);
