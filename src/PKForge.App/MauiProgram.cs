@@ -104,6 +104,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<SavePickerViewModel>();
         builder.Services.AddTransient<HomePage>();
         builder.Services.AddTransient<RotomHomePage>();
+        builder.Services.AddTransient<RotomIntroPage>();
         builder.Services.AddTransient<RotomProfilePage>();
         builder.Services.AddTransient<SecondScreenBoxPage>();
         builder.Services.AddTransient<BankPage>();
