@@ -20,6 +20,18 @@ public sealed class RotomProfilePage : ContentPage
             TextColor = Color.FromArgb("#4a4b47"),
             HorizontalTextAlignment = TextAlignment.Center,
         };
+        var back = new Button
+        {
+            Text = "Retour",
+            FontFamily = "RotomUI",
+            TextColor = Colors.White,
+            BackgroundColor = Color.FromArgb("#ee2b25"),
+            CornerRadius = 22,
+            HeightRequest = 52,
+            WidthRequest = 180,
+            Margin = new Thickness(0, 18, 0, 0),
+        };
+        back.Clicked += async (_, _) => await Navigation.PopAsync();
         Content = new VerticalStackLayout
         {
             VerticalOptions = LayoutOptions.Center,
@@ -32,6 +44,7 @@ public sealed class RotomProfilePage : ContentPage
                 Line($"Chromatiques : {all.Count(e => e.Info.Shiny)}", 20),
                 Line($"Espèces : {all.Select(e => e.Info.Species).Distinct().Count()}", 20),
                 Line("Cet écran sera dessiné bientôt.", 14),
+                back,
             },
         };
     }

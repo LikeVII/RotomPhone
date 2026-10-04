@@ -18,6 +18,8 @@ public sealed class RotomHomePage : ContentPage
     private const float DesignW = 922f, DesignH = 2048f;
     private const int BubbleMs = 15000;
     private const int HoldMs = 550;
+    private const float BackgroundSpeed = 0.6f;
+    private const float PokemonPad = 70f;
 
     private static readonly SKRect RotomRect = new(-97f, 143.5f, -97f + 1116.5f, 143.5f + 383.5f);
     private static readonly SKRect PokemonBox = new(-35f, 727f, -35f + 973f, 727f + 973f);
@@ -25,13 +27,15 @@ public sealed class RotomHomePage : ContentPage
 
     private enum Target { None, Handle, LeftFlap, Profile, Pokemon }
 
-    private sealed record BubbleInfo(string Number, string Name, IReadOnlyList<int> Types, IReadOnlyList<string> Lines);
+    private sealed record BubbleInfo(string Number, string Name, IReadOnlyList<int> Types, IReadOnlyList<string> Lines, int Ball);
 
     private readonly IBankService _bank;
     private readonly ISpriteService _sprites;
     private readonly TrainerProfileStore _profiles;
     private readonly Grid _root;
-    private readonly SKCanvasView _canvas;
+    private readonly SKCanvasView _top;
+    private readonly SKCanvasView _bottom;
+    private RiveAnimationView? _rive;
     private readonly Grid _menu;
     private readonly Border _menuPanel;
     private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
@@ -64,7 +68,13 @@ public sealed class RotomHomePage : ContentPage
     private bool _menuTriggered;
     private IDispatcherTimer? _holdTimer;
 
-    private float _scale = 1f, _offX, _botY;
+    private float _scale = 1f, _offX, _botY, _designLeft, _designRight = DesignW;
+
+    private SKImage? _pokeCache;
+    private SKBitmap? _pokeCacheSource;
+    private float _pokeCacheScale;
+    private SKBitmap? _ballBitmap;
+    private SKImage? _ballImage;
 
     public RotomHomePage(IBankService bank, ISpriteService sprites, TrainerProfileStore profiles)
     {
@@ -75,35 +85,20 @@ public sealed class RotomHomePage : ContentPage
         NavigationPage.SetHasNavigationBar(this, false);
 
         _root = new Grid();
-        // Rive background: preview-quality plugin, so a failure just leaves the plain teal colour.
-        try
-        {
-            var rive = new RiveAnimationView
-            {
-                ResourceName = "home_background",
-                AutoPlay = true,
-                Fit = RiveFitMode.Cover,
-                RiveAlignment = RiveAlignmentMode.Center,
-                InputTransparent = true,
-            };
-            _root.Add(rive);
-        }
-        catch (Exception error)
-        {
-            Services.AppLog.Warn("rotom", $"Rive background unavailable: {error.Message}");
-        }
-
-        _canvas = new SKCanvasView { EnableTouchEvents = true };
-        _canvas.PaintSurface += OnPaint;
-        _canvas.Touch += OnTouch;
-        _root.Add(_canvas);
+        _bottom = new SKCanvasView { InputTransparent = true };
+        _bottom.PaintSurface += OnPaintBottom;
+        _root.Add(_bottom);
+        _top = new SKCanvasView { EnableTouchEvents = true };
+        _top.PaintSurface += OnPaintTop;
+        _top.Touch += OnTouch;
+        _root.Add(_top);
 
         _menuPanel = new Border();
         _menu = BuildMenu();
         _root.Add(_menu);
         Content = _root;
-        _ = RotomAssets.WarmAsync().ContinueWith(_ => MainThread.BeginInvokeOnMainThread(_canvas.InvalidateSurface));
-        _ = RotomFont.WarmAsync().ContinueWith(_ => MainThread.BeginInvokeOnMainThread(_canvas.InvalidateSurface));
+        _ = RotomAssets.WarmAsync().ContinueWith(_ => MainThread.BeginInvokeOnMainThread(InvalidateAll));
+        _ = RotomFont.WarmAsync().ContinueWith(_ => MainThread.BeginInvokeOnMainThread(InvalidateAll));
     }
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
@@ -111,6 +106,7 @@ public sealed class RotomHomePage : ContentPage
     protected override void OnAppearing()
     {
         base.OnAppearing();
+        AttachRive();
         RefreshFromBank();
         var now = _clock.ElapsedMilliseconds;
         _nextBlink = now + 2500;
@@ -122,8 +118,70 @@ public sealed class RotomHomePage : ContentPage
         _timer.Start();
     }
 
+    private void InvalidateTop() => _top.InvalidateSurface();
+
+    private void InvalidateAll()
+    {
+        _bottom.InvalidateSurface();
+        _top.InvalidateSurface();
+    }
+
+    /// <summary>
+    /// The animated background lives only while this page is on screen. Android destroys the page's
+    /// views while another page covers it, and a Rive view brought back from that state crashes the
+    /// app, so the view is built fresh every time the page appears.
+    /// </summary>
+    private void AttachRive()
+    {
+        if (_rive is not null) return;
+        // Preview-quality plugin: a failure just leaves the plain teal colour.
+        try
+        {
+            var rive = new RiveAnimationView
+            {
+                ResourceName = "home_background",
+                AutoPlay = true,
+                Fit = RiveFitMode.Cover,
+                RiveAlignment = RiveAlignmentMode.Center,
+                InputTransparent = true,
+            };
+            _root.Insert(0, rive);
+            _rive = rive;
+            Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(400), ApplyBackgroundSpeed);
+        }
+        catch (Exception error)
+        {
+            Services.AppLog.Warn("rotom", $"Rive background unavailable: {error.Message}");
+        }
+    }
+
+    private void DetachRive()
+    {
+        var rive = _rive;
+        _rive = null;
+        if (rive is null) return;
+        try { _root.Remove(rive); }
+        catch (Exception error) { Services.AppLog.Warn("rotom", $"Rive background removal failed: {error.Message}"); }
+    }
+
+    private void ApplyBackgroundSpeed()
+    {
+#if ANDROID
+        try
+        {
+            if (_rive?.Handler?.PlatformView is global::App.Rive.Runtime.Kotlin.RiveAnimationView native)
+                native.Controller.Speed = BackgroundSpeed;
+        }
+        catch (Exception error)
+        {
+            Services.AppLog.Warn("rotom", $"Could not slow the background: {error.Message}");
+        }
+#endif
+    }
+
     protected override void OnDisappearing()
     {
+        DetachRive();
         _timer?.Stop();
         _holdTimer?.Stop();
         base.OnDisappearing();
@@ -162,7 +220,7 @@ public sealed class RotomHomePage : ContentPage
             ];
         }
         _statIndex = 0;
-        _canvas.InvalidateSurface();
+        InvalidateAll();
     }
 
     // ── Animation clock ──────────────────────────────────────────────────────
@@ -193,33 +251,50 @@ public sealed class RotomHomePage : ContentPage
         // Achievements change in turn.
         if (now >= _nextStat) { _statIndex = (_statIndex + 1) % Math.Max(1, _stats.Length); _nextStat = now + 3500; dirty = true; }
 
-        if (dirty) _canvas.InvalidateSurface();
+        if (dirty) InvalidateTop();
     }
 
     // ── Painting ─────────────────────────────────────────────────────────────
 
-    private void OnPaint(object? sender, SKPaintSurfaceEventArgs e)
+    private bool ComputeLayout(SKImageInfo info)
     {
-        var c = e.Surface.Canvas;
-        c.Clear(SKColors.Transparent);
-        float w = e.Info.Width, h = e.Info.Height;
-        if (w <= 0 || h <= 0) return;
+        float w = info.Width, h = info.Height;
+        if (w <= 0 || h <= 0) return false;
         _scale = Math.Min(w / DesignW, h / DesignH);
         _offX = (w - DesignW * _scale) / 2f;
         _botY = h - DesignH * _scale;
+        _designLeft = -_offX / _scale;
+        _designRight = DesignW + _offX / _scale;
+        return true;
+    }
 
-        // Bottom group: floor and the Pokémon.
+    /// <summary>Bottom layer: the floor and the Pokémon. Repainted only when one of them changes.</summary>
+    private void OnPaintBottom(object? sender, SKPaintSurfaceEventArgs e)
+    {
+        var c = e.Surface.Canvas;
+        c.Clear(SKColors.Transparent);
+        if (!ComputeLayout(e.Info)) return;
         c.Save();
         c.Translate(_offX, _botY);
         c.Scale(_scale);
-        DrawImage(c, "rotomphone/rotom/floor.png", new SKRect(0, 1396, 922, 1396 + 652));
+        // The floor reaches both screen edges, however wide the phone is.
+        DrawImage(c, "rotomphone/rotom/floor.png", new SKRect(_designLeft, 1396, _designRight, 1396 + 652));
         DrawPokemon(c);
         c.Restore();
+    }
 
-        // Top group: Rotom and the yellow box.
+    /// <summary>Top layer: Rotom and the yellow box. Repainted by the blink, mouth and fade animations.</summary>
+    private void OnPaintTop(object? sender, SKPaintSurfaceEventArgs e)
+    {
+        var c = e.Surface.Canvas;
+        c.Clear(SKColors.Transparent);
+        if (!ComputeLayout(e.Info)) return;
         c.Save();
         c.Translate(_offX, 0);
         c.Scale(_scale);
+        // The dark layer sits behind Rotom: it dims the Pokémon, never the Rotom shape.
+        if (_bubbleAlpha > 0.01f)
+            DrawImage(c, "rotomphone/rotom/black_square.png", new SKRect(_designLeft, 0, _designRight, 390), _bubbleAlpha);
         DrawRotom(c);
         DrawBubble(c);
         c.Restore();
@@ -297,14 +372,15 @@ public sealed class RotomHomePage : ContentPage
     {
         if (_bubbleAlpha <= 0.01f || _bubble is null) return;
         var a = _bubbleAlpha;
-        using (var dim = new SKPaint { Color = new SKColor(0, 0, 0, (byte)(0.45f * 255 * a)) })
-            c.DrawRect(new SKRect(0, 0, 922, 390), dim);
         DrawImage(c, "rotomphone/rotom/bubble_shell.png", new SKRect(65f, 455f, 65f + 375f, 455f + 426f), a);
 
         var alpha = (byte)(a * 255);
         using var black = new SKPaint { Color = SKColors.Black.WithAlpha(alpha), IsAntialias = true };
         using (var f = TextFont(32f))
+        {
             c.DrawText(_bubble.Number, 104f, 586f + 32f * 0.88f, SKTextAlign.Left, f, black);
+            DrawBall(c, 104f + f.MeasureText(_bubble.Number) + 14f, 580f, a);
+        }
 
         const float lineHeight = 39f;
         const float top = 644f;
@@ -317,7 +393,7 @@ public sealed class RotomHomePage : ContentPage
             foreach (var type in _bubble.Types)
             {
                 if (type < 1 || type > RotomAssets.TypeNames.Length) continue;
-                DrawImage(c, $"rotomphone/types/type_{RotomAssets.TypeNames[type - 1]}.png", new SKRect(x, 648f, x + 42f, 648f + 36f), a);
+                DrawImage(c, $"rotomphone/types/type_{RotomAssets.TypeNames[type - 1]}.png", new SKRect(x, 632f, x + 42f, 632f + 36f), a);
                 x += 46f;
             }
         }
@@ -327,6 +403,27 @@ public sealed class RotomHomePage : ContentPage
             using var f = TextFont(size);
             c.DrawText(text, 82f, top + (i + 1) * lineHeight + 24f * 0.88f, SKTextAlign.Left, f, black);
         }
+    }
+
+    /// <summary>The Poké Ball of the shown Pokémon, next to its number.</summary>
+    private void DrawBall(SKCanvas c, float x, float y, float alpha)
+    {
+        if (_bubble is null || _bubble.Ball <= 0) return;
+        var ball = _sprites.GetBall(_bubble.Ball);
+        if (ball is null)
+        {
+            _sprites.WarmBall(_bubble.Ball, () => MainThread.BeginInvokeOnMainThread(InvalidateTop));
+            return;
+        }
+        if (!ReferenceEquals(ball, _ballBitmap))
+        {
+            _ballImage?.Dispose();
+            _ballImage = SKImage.FromBitmap(ball);
+            _ballBitmap = ball;
+        }
+        if (_ballImage is null) return;
+        using var paint = new SKPaint { IsAntialias = true, Color = SKColors.White.WithAlpha((byte)(alpha * 255)) };
+        c.DrawImage(_ballImage, new SKRect(x, y, x + 44f, y + 44f), new SKSamplingOptions(SKFilterMode.Nearest), paint);
     }
 
     private void DrawPokemon(SKCanvas c)
@@ -346,7 +443,7 @@ public sealed class RotomHomePage : ContentPage
         var pixelArt = false;
         if (bitmap is null)
         {
-            if (!_sprites.HomeUnavailable(look)) _sprites.WarmHome(look, () => MainThread.BeginInvokeOnMainThread(_canvas.InvalidateSurface));
+            if (!_sprites.HomeUnavailable(look)) _sprites.WarmHome(look, () => MainThread.BeginInvokeOnMainThread(InvalidateAll));
             else { bitmap = _sprites.GetSprite(look); pixelArt = true; }
         }
         if (bitmap is null) return;
@@ -365,6 +462,34 @@ public sealed class RotomHomePage : ContentPage
         var dest = new SKRect(PokemonBox.MidX - w / 2f, PokemonBox.Bottom - h, PokemonBox.MidX + w / 2f, PokemonBox.Bottom);
         var sampling = pixelArt ? new SKSamplingOptions(SKFilterMode.Nearest) : new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
 
+        // The shadow, outline and picture are composed once; repainting then costs one draw.
+        if (_pokeCache is null || !ReferenceEquals(_pokeCacheSource, bitmap) || Math.Abs(_pokeCacheScale - _scale) > 0.001f)
+        {
+            _pokeCache?.Dispose();
+            _pokeCache = null;
+            var width = (int)MathF.Ceiling((PokemonBox.Width + 2 * PokemonPad) * _scale);
+            var height = (int)MathF.Ceiling((PokemonBox.Height + 2 * PokemonPad) * _scale);
+            using var surface = SKSurface.Create(new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul));
+            if (surface is not null)
+            {
+                var sc = surface.Canvas;
+                sc.Clear(SKColors.Transparent);
+                sc.Scale(_scale);
+                sc.Translate(PokemonPad - PokemonBox.Left, PokemonPad - PokemonBox.Top);
+                ComposePokemon(sc, image, dest, sampling);
+                _pokeCache = surface.Snapshot();
+                _pokeCacheSource = bitmap;
+                _pokeCacheScale = _scale;
+            }
+        }
+        if (_pokeCache is null) return;
+        c.DrawImage(_pokeCache,
+            new SKRect(PokemonBox.Left - PokemonPad, PokemonBox.Top - PokemonPad, PokemonBox.Right + PokemonPad, PokemonBox.Bottom + PokemonPad),
+            new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear));
+    }
+
+    private static void ComposePokemon(SKCanvas c, SKImage image, SKRect dest, SKSamplingOptions sampling)
+    {
         // Soft shadow behind.
         using (var shadow = new SKPaint
         {
@@ -416,8 +541,9 @@ public sealed class RotomHomePage : ContentPage
     {
         var t = ToDesignTop(pixel);
         if (new SKRect(396f, 395f, 536f, 470f).Contains(t)) return Target.Handle;
-        if (new SKRect(-85f, 195f, 112f, 515f).Contains(t)) return Target.LeftFlap;
-        if (new SKRect(100f, 190f, 825f, 440f).Contains(t)) return Target.Profile;
+        if (new SKRect(-130f, 180f, 125f, 530f).Contains(t)) return Target.LeftFlap;
+        // Only the white info screen opens the profile.
+        if (new SKRect(211f, 279f, 711f, 390f).Contains(t)) return Target.Profile;
         if (_entry is not null && PokemonBox.Contains(ToDesignBottom(pixel))) return Target.Pokemon;
         return Target.None;
     }
@@ -439,7 +565,8 @@ public sealed class RotomHomePage : ContentPage
                 args.Handled = true;
                 var dx = args.Location.X - _pressPoint.X;
                 var dy = args.Location.Y - _pressPoint.Y;
-                if (Math.Abs(dx) > 24f * _scale || Math.Abs(dy) > 24f * _scale) { _moved = true; _holdTimer?.Stop(); }
+                var slop = 40f * Math.Max(1f, _scale);
+                if (Math.Abs(dx) > slop || Math.Abs(dy) > slop) { _moved = true; _holdTimer?.Stop(); }
                 if (_pressTarget == Target.Handle && !_menuTriggered && dy > 60f * _scale)
                 {
                     _menuTriggered = true;
@@ -499,13 +626,13 @@ public sealed class RotomHomePage : ContentPage
         var now = _clock.ElapsedMilliseconds;
         _bubbleUntil = now + BubbleMs;
         _nextMouthToggle = now;
-        if (_bubble is not null) { _canvas.InvalidateSurface(); return; }
+        if (_bubble is not null) { InvalidateTop(); return; }
         var entry = _entry;
         _ = Task.Run(() => BuildBubble(entry)).ContinueWith(t =>
             MainThread.BeginInvokeOnMainThread(() =>
             {
                 if (_entry?.Id == entry.Id && t.Status == TaskStatus.RanToCompletion) _bubble = t.Result;
-                _canvas.InvalidateSurface();
+                InvalidateTop();
             }));
     }
 
@@ -515,6 +642,7 @@ public sealed class RotomHomePage : ContentPage
         var strings = PKHeX.Core.GameInfo.GetStrings("fr");
         var species = info.Species > 0 && info.Species < strings.specieslist.Length ? strings.specieslist[info.Species] : "?";
         var lines = new List<string>();
+        var ball = 0;
         if (!string.IsNullOrWhiteSpace(info.Nickname) && !string.Equals(info.Nickname, species, StringComparison.OrdinalIgnoreCase))
             lines.Add($"Surnom : {info.Nickname}");
         lines.Add($"Niveau : {info.Level}");
@@ -525,13 +653,14 @@ public sealed class RotomHomePage : ContentPage
             {
                 if (pk.MetDate is { } date) lines.Add($"Capturé le : {date.Day:00}/{date.Month:00}/{date.Year:0000}");
                 lines.Add(RotomOrigin.Line(pk.Version));
+                ball = pk.Ball;
             }
         }
         catch (Exception error)
         {
             Services.AppLog.Warn("rotom", $"Could not read origin of a Bank entry: {error.Message}");
         }
-        return new BubbleInfo($"{info.Species:0000}", species, HabitatCatalog.TypesFor(info.Species, info.Form), lines);
+        return new BubbleInfo($"{info.Species:0000}", species, HabitatCatalog.TypesFor(info.Species, info.Form), lines, ball);
     }
 
     // ── Summary, profile, menu ───────────────────────────────────────────────

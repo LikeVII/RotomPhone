@@ -28,7 +28,7 @@ public static class RotomAssets
         foreach (var n in new[]
                  {
                      "rotom_base", "rotom_eyes_open", "rotom_eyes_closed", "rotom_mouth_closed",
-                     "rotom_mouth_open", "bubble_shell", "floor",
+                     "rotom_mouth_open", "bubble_shell", "floor", "black_square",
                  })
             yield return $"rotomphone/rotom/{n}.png";
         foreach (var t in TypeNames) yield return $"rotomphone/types/type_{t}.png";
