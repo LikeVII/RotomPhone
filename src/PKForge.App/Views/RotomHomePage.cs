@@ -173,8 +173,8 @@ public sealed class RotomHomePage : ContentPage
             // view.getController().setSpeed(speed). Any failure just leaves the normal speed.
             if (_rive?.Handler?.PlatformView is Java.Lang.Object native)
             {
-                var controller = native.Class.GetMethod("getController")?.Invoke(native);
-                controller?.Class.GetMethod("setSpeed", Java.Lang.Float.Type)?.Invoke(controller, Java.Lang.Float.ValueOf(BackgroundSpeed));
+                var controller = native.Class.GetMethod("getController", Array.Empty<Java.Lang.Class>())?.Invoke(native);
+                controller?.Class.GetMethod("setSpeed", Java.Lang.Float.Type!)?.Invoke(controller, Java.Lang.Float.ValueOf(BackgroundSpeed));
             }
         }
         catch (Exception error)
