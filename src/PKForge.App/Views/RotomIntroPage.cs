@@ -149,10 +149,11 @@ public sealed class RotomIntroPage : ContentPage
         if (_leaving) return;
         _leaving = true;
         _timer?.Stop();
-        DetachEyes();
         await Task.Yield();
         var services = IPlatformApplication.Current?.Services;
         if (services is null || Window is null) return;
+        // The eyes stay on screen until the home screen replaces this page (OnDisappearing removes them);
+        // taking them away first left a face without eyes while the home screen was being prepared.
         var home = services.GetRequiredService<RotomHomePage>();
         Window.Page = new NavigationPage(home)
         {
