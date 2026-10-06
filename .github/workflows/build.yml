@@ -36,9 +36,19 @@ jobs:
             exit 1
           fi
           printf '%s' "$PKFORGE_ANDROID_KEYSTORE_BASE64" | base64 --decode > "${RUNNER_TEMP}/pkforge-release.p12"
+      - name: Decode the Rotom Phone signing key
+        if: github.ref_type != 'tag'
+        env:
+          ROTOM_KEYSTORE_BASE64: ${{ secrets.ROTOM_KEYSTORE_BASE64 }}
+        run: |
+          # The same key on every build lets a new APK install over the old one without losing data.
+          if [[ -n "$ROTOM_KEYSTORE_BASE64" ]]; then
+            printf '%s' "$ROTOM_KEYSTORE_BASE64" | base64 --decode > "${RUNNER_TEMP}/rotom.p12"
+          fi
       - name: Build Android APK
         shell: bash
         env:
+          ROTOM_KEYSTORE_PASSWORD: ${{ secrets.ROTOM_KEYSTORE_PASSWORD }}
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/pkforge-release.p12
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.PKFORGE_ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.PKFORGE_ANDROID_KEY_ALIAS }}
@@ -46,6 +56,15 @@ jobs:
         run: |
           configuration="Debug"
           signing_args=(-p:AndroidKeyStore=false)
+          if [[ "$GITHUB_REF_TYPE" != "tag" && -s "$RUNNER_TEMP/rotom.p12" && -n "$ROTOM_KEYSTORE_PASSWORD" ]]; then
+            signing_args=(
+              -p:AndroidKeyStore=true
+              -p:AndroidSigningKeyStore="$RUNNER_TEMP/rotom.p12"
+              -p:AndroidSigningStorePass="$ROTOM_KEYSTORE_PASSWORD"
+              -p:AndroidSigningKeyAlias=rotom
+              -p:AndroidSigningKeyPass="$ROTOM_KEYSTORE_PASSWORD"
+            )
+          fi
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             configuration="Release"
             signing_args=(
