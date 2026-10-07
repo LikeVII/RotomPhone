@@ -25,7 +25,17 @@ public sealed class RotomHomePage : ContentPage
     private static readonly SKRect PokemonBox = new(-35f, 727f, -35f + 973f, 727f + 973f);
     private static readonly SKColor InkGrey = SKColor.Parse("#7a7b76");
 
-    private enum Target { None, Handle, LeftFlap, Profile, NextMon, Pokemon }
+    private enum Target { None, Handle, LeftFlap, Profile, NextMon, Pokemon, MenuItem }
+
+    /// <summary>One button of the menu: its picture, the text drawn on it (blank buttons only) and what it does (null = nothing yet).</summary>
+    private sealed record MenuItem(string Asset, string[]? Label, Func<Task>? Action);
+
+    // The menu frame (1080 wide) is slightly wider than the home frame (922 wide). The Rotom keeps its size;
+    // the panel body and the buttons are scaled by MenuK to fit the width, the part behind the Rotom is not.
+    private const float MenuK = 922f / 1080f;
+    private static float MenuX(float x) => 461f + (x - 540f) * MenuK;
+    private static float MenuY(float y) => 506f + (y - 506f) * MenuK;
+    private static readonly SKRect MenuRect = new(-82f, 316f, 1010f, 506f + 1894f * MenuK + 1f);
 
     private sealed record BubbleInfo(string Number, string Name, IReadOnlyList<int> Types, IReadOnlyList<string> Lines, int Ball);
 
@@ -36,8 +46,7 @@ public sealed class RotomHomePage : ContentPage
     private readonly SKCanvasView _top;
     private readonly SKCanvasView _bottom;
     private RiveAnimationView? _rive;
-    private readonly Grid _menu;
-    private readonly Border _menuPanel;
+    private readonly MenuItem[] _items;
     private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
     private readonly Random _random = new();
     private IDispatcherTimer? _timer;
@@ -59,6 +68,11 @@ public sealed class RotomHomePage : ContentPage
     private SKBitmap? _homeBitmap;
     private SKImage? _homeImage;
     private bool _menuOpen;
+    private bool _navigating;
+    private float _menuProgress;
+    private int _pressItem = -1;
+    private SKImage? _menuCache, _squareCache, _floorCache;
+    private string _menuKey = "", _squareKey = "", _floorKey = "";
 
     // Touch state
     private Target _pressTarget;
@@ -93,9 +107,19 @@ public sealed class RotomHomePage : ContentPage
         _top.Touch += OnTouch;
         _root.Add(_top);
 
-        _menuPanel = new Border();
-        _menu = BuildMenu();
-        _root.Add(_menu);
+        _items =
+        [
+            new("btn_pokedex", null, null),
+            new("btn_pokemon", null, () => OpenAsync<BankPage>()),
+            new("btn_shiny_collection", null, null),
+            new("btn_teams", null, null),
+            new("btn_blank", ["Poképark"], () => OpenOldHomeAsync(HomeStartAction.Park)),
+            new("btn_blank", ["Autopilote"], () => OpenOldHomeAsync(HomeStartAction.Autopilot)),
+            new("btn_blank", ["Événements"], () => OpenOldHomeAsync(HomeStartAction.Events)),
+            new("btn_blank", ["Réglages"], () => OpenOldHomeAsync(HomeStartAction.Settings)),
+            new("btn_blank", ["Jeux et", "sauvegardes"], () => OpenOldHomeAsync(HomeStartAction.None)),
+            new("btn_blank", ["Restauration"], () => OpenAsync<BackupHistoryPage>()),
+        ];
         Content = _root;
         _ = RotomAssets.WarmAsync().ContinueWith(_ => MainThread.BeginInvokeOnMainThread(InvalidateAll));
         _ = RotomFont.WarmAsync().ContinueWith(_ => MainThread.BeginInvokeOnMainThread(InvalidateAll));
@@ -273,18 +297,61 @@ public sealed class RotomHomePage : ContentPage
         return true;
     }
 
-    /// <summary>Bottom layer: the floor and the Pokémon. Repainted only when one of them changes.</summary>
+    /// <summary>
+    /// Bottom layer: the floor, the Pokémon, the dark square and the menu panel (which slides out from
+    /// under the Rotom). Repainted only when one of them changes.
+    /// </summary>
     private void OnPaintBottom(object? sender, SKPaintSurfaceEventArgs e)
     {
         var c = e.Surface.Canvas;
         c.Clear(SKColors.Transparent);
         if (!ComputeLayout(e.Info)) return;
+        var sampling = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None);
+        var p = _menuProgress;
+
+        if (p < 0.999f)
+        {
+            c.Save();
+            c.Translate(_offX, _botY);
+            c.Scale(_scale);
+            // The floor reaches both screen edges, however wide the phone is.
+            var floorRect = new SKRect(_designLeft, 1396, _designRight, 2048);
+            var floor = Cached(ref _floorCache, ref _floorKey, floorRect, ["rotomphone/rotom/floor.png"],
+                sc => DrawImage(sc, "rotomphone/rotom/floor.png", floorRect));
+            if (floor is not null) c.DrawImage(floor, floorRect, sampling);
+            DrawPokemon(c);
+            c.Restore();
+        }
+
         c.Save();
-        c.Translate(_offX, _botY);
+        c.Translate(_offX, 0);
         c.Scale(_scale);
-        // The floor reaches both screen edges, however wide the phone is.
-        DrawImage(c, "rotomphone/rotom/floor.png", new SKRect(_designLeft, 1396, _designRight, 1396 + 652));
-        DrawPokemon(c);
+        // The dark layer is always there, behind Rotom: it dims the Pokémon, never the Rotom shape.
+        var squareRect = new SKRect(_designLeft, 0, _designRight, 390);
+        var square = Cached(ref _squareCache, ref _squareKey, squareRect, ["rotomphone/rotom/black_square.png"],
+            sc => DrawImage(sc, "rotomphone/rotom/black_square.png", squareRect));
+        if (square is not null) c.DrawImage(square, squareRect, sampling);
+
+        if (p > 0.001f)
+        {
+            var panel = EnsureMenuCache();
+            if (panel is not null)
+            {
+                // The panel comes out from under the Rotom base: nothing of it shows above its top edge.
+                c.Save();
+                c.ClipRect(new SKRect(_designLeft - 200f, MenuRect.Top, _designRight + 200f, 6000f));
+                var dy = -(1f - p) * MenuRect.Height;
+                c.DrawImage(panel, new SKRect(MenuRect.Left, MenuRect.Top + dy, MenuRect.Right, MenuRect.Bottom + dy), sampling);
+                if (_pressItem >= 0 && p >= 0.99f)
+                {
+                    var r = ItemRect(_pressItem);
+                    r.Inflate(-14f * MenuK, -14f * MenuK);
+                    using var shade = new SKPaint { Color = new SKColor(0, 0, 0, 70), IsAntialias = true };
+                    c.DrawRoundRect(r, 44f * MenuK, 44f * MenuK, shade);
+                }
+                c.Restore();
+            }
+        }
         c.Restore();
     }
 
@@ -297,23 +364,93 @@ public sealed class RotomHomePage : ContentPage
         c.Save();
         c.Translate(_offX, 0);
         c.Scale(_scale);
-        // The dark layer is always there, behind Rotom: it dims the Pokémon, never the Rotom shape.
-        // The dark layer and the Rotom shape are big pictures: they are scaled once into a cache,
-        // so each animation frame only copies them.
-        var baseRect = new SKRect(_designLeft, 0, _designRight, RotomRect.Bottom);
-        var designLeft = _designLeft;
-        var designRight = _designRight;
-        var layer = Cached(ref _baseCache, ref _baseKey, baseRect,
-            ["rotomphone/rotom/black_square.png", "rotomphone/rotom/rotom_base.png"],
-            sc =>
-            {
-                DrawImage(sc, "rotomphone/rotom/black_square.png", new SKRect(designLeft, 0, designRight, 390));
-                DrawImage(sc, "rotomphone/rotom/rotom_base.png", RotomRect);
-            });
+        // The Rotom shape is a big picture: it is scaled once into a cache, so each animation frame only copies it.
+        var baseRect = new SKRect(RotomRect.Left, 0, RotomRect.Right, RotomRect.Bottom);
+        var layer = Cached(ref _baseCache, ref _baseKey, baseRect, ["rotomphone/rotom/rotom_base.png"],
+            sc => DrawImage(sc, "rotomphone/rotom/rotom_base.png", RotomRect));
         if (layer is not null)
             c.DrawImage(layer, baseRect, new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
         DrawRotom(c);
-        DrawBubble(c);
+        if (_menuProgress < 0.001f) DrawBubble(c);
+        c.Restore();
+    }
+
+    // ── The menu picture ─────────────────────────────────────────────────────
+
+    private static SKRect ItemRect(int index)
+    {
+        var bx = 46f + 510f * (index % 2);
+        var by = 604f + 341f * (index / 2);
+        return new SKRect(MenuX(bx), MenuY(by), MenuX(bx + 493f), MenuY(by + 313f));
+    }
+
+    /// <summary>The red panel with its buttons, drawn once at the current size and then only moved.</summary>
+    private SKImage? EnsureMenuCache()
+    {
+        var wanted = $"{_scale:F4}|{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(RotomFont.Face)}";
+        if (_menuCache is not null && _menuKey == wanted) return _menuCache;
+        var panel = RotomAssets.Get("rotomphone/menu/menu_panel.png");
+        if (panel is null) return null;
+        foreach (var item in _items)
+            if (RotomAssets.Get($"rotomphone/menu/{item.Asset}.png") is null) return null;
+
+        _menuCache?.Dispose();
+        _menuCache = null;
+        var width = (int)MathF.Ceiling(MenuRect.Width * _scale);
+        var height = (int)MathF.Ceiling(MenuRect.Height * _scale);
+        if (width <= 0 || height <= 0) return null;
+        using var surface = SKSurface.Create(new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul));
+        if (surface is null) return null;
+        var sc = surface.Canvas;
+        sc.Clear(SKColors.Transparent);
+        sc.Scale(width / MenuRect.Width, height / MenuRect.Height);
+        sc.Translate(-MenuRect.Left, -MenuRect.Top);
+        var sampling = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None);
+        using var paint = new SKPaint { IsAntialias = true };
+
+        // The body (scaled to the width of the screen), then the part that sits behind the Rotom (not scaled) on top of its first row.
+        sc.DrawImage(panel, new SKRect(0, 189, panel.Width, 2084),
+            new SKRect(MenuX(-3f), 506f - MenuK, MenuX(panel.Width - 3f), 506f + 1894f * MenuK), sampling, paint);
+        sc.DrawImage(panel, new SKRect(0, 0, panel.Width, 190), new SKRect(-82f, 316f, -82f + panel.Width, 506f), sampling, paint);
+
+        for (var i = 0; i < _items.Length; i++)
+        {
+            var item = _items[i];
+            var picture = RotomAssets.Get($"rotomphone/menu/{item.Asset}.png");
+            var rect = ItemRect(i);
+            if (picture is not null) sc.DrawImage(picture, rect, sampling, paint);
+            if (item.Label is { } lines) DrawButtonLabel(sc, rect, lines);
+        }
+        _menuCache = surface.Snapshot();
+        _menuKey = wanted;
+        return _menuCache;
+    }
+
+    /// <summary>White text with a black outline, centred on a blank button (button units: 493 x 313).</summary>
+    private static void DrawButtonLabel(SKCanvas c, SKRect rect, string[] lines)
+    {
+        c.Save();
+        c.Translate(rect.Left, rect.Top);
+        c.Scale(MenuK);
+        var size = lines.Length > 1 ? 60f : 72f;
+        var gap = lines.Length > 1 ? 72f : 0f;
+        for (var i = 0; i < lines.Length; i++)
+        {
+            using var probe = TextFont(size);
+            var text = FitCompute(probe, lines[i], 400f, size, 36f, out var fitted);
+            using var font = TextFont(fitted);
+            var m = font.Metrics;
+            var centre = 160f + (i - (lines.Length - 1) / 2f) * gap;
+            var baseline = centre - (m.Ascent + m.Descent) / 2f;
+            using var outline = new SKPaint
+            {
+                Color = SKColors.Black, IsAntialias = true, Style = SKPaintStyle.Stroke,
+                StrokeWidth = 12f, StrokeJoin = SKStrokeJoin.Round,
+            };
+            using var fill = new SKPaint { Color = SKColors.White, IsAntialias = true };
+            c.DrawText(text, 240f, baseline, SKTextAlign.Center, font, outline);
+            c.DrawText(text, 240f, baseline, SKTextAlign.Center, font, fill);
+        }
         c.Restore();
     }
 
@@ -373,6 +510,27 @@ public sealed class RotomHomePage : ContentPage
             if (closed is not null) c.DrawImage(closed, At(414.5f, 239.5f, closed), new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
         }
 
+        // On the white screen the profile fades into the word MENU while the menu is open.
+        var m = _menuProgress;
+        if (m < 0.001f) DrawInfo(c);
+        else
+        {
+            if (m < 0.999f)
+            {
+                using var layerPaint = new SKPaint { Color = SKColors.White.WithAlpha((byte)((1f - m) * 255)) };
+                c.SaveLayer(layerPaint);
+                DrawInfo(c);
+                c.Restore();
+            }
+            using var word = TextFont(57f);
+            using var ink = Ink(InkGrey.WithAlpha((byte)(m * 255)));
+            var metrics = word.Metrics;
+            c.DrawText("MENU", 461f, 334.5f - (metrics.Ascent + metrics.Descent) / 2f, SKTextAlign.Center, word, ink);
+        }
+    }
+
+    private void DrawInfo(SKCanvas c)
+    {
         DrawAvatar(c);
         using (var name = TextFont(40f)) using (var ink = Ink(InkGrey))
         {
@@ -622,7 +780,25 @@ public sealed class RotomHomePage : ContentPage
         {
             case SKTouchAction.Pressed:
                 args.Handled = true;
-                _pressTarget = _menuOpen ? Target.None : HitTest(args.Location);
+                _pressItem = -1;
+                _pressTarget = Target.None;
+                if (_menuProgress > 0.001f)
+                {
+                    // While the menu is out only its buttons answer; nothing else on the screen does.
+                    if (_menuOpen && _menuProgress >= 0.99f)
+                    {
+                        var d = ToDesignTop(args.Location);
+                        for (var i = 0; i < _items.Length; i++)
+                            if (_items[i].Action is not null && ItemRect(i).Contains(d))
+                            {
+                                _pressItem = i;
+                                _pressTarget = Target.MenuItem;
+                                _bottom.InvalidateSurface();
+                                break;
+                            }
+                    }
+                }
+                else _pressTarget = HitTest(args.Location);
                 _pressPoint = args.Location;
                 _holdFired = false;
                 _moved = false;
@@ -634,7 +810,18 @@ public sealed class RotomHomePage : ContentPage
                 var dx = args.Location.X - _pressPoint.X;
                 var dy = args.Location.Y - _pressPoint.Y;
                 var slop = 40f * Math.Max(1f, _scale);
-                if (Math.Abs(dx) > slop || Math.Abs(dy) > slop) { _moved = true; _holdTimer?.Stop(); }
+                if (Math.Abs(dx) > slop || Math.Abs(dy) > slop)
+                {
+                    _moved = true;
+                    _holdTimer?.Stop();
+                    if (_pressItem >= 0) { _pressItem = -1; _bottom.InvalidateSurface(); }
+                }
+                // Swiping up anywhere closes the menu.
+                if (_menuOpen && _menuProgress >= 0.99f && !_menuTriggered && dy < -80f * _scale)
+                {
+                    _menuTriggered = true;
+                    _ = CloseMenuAsync();
+                }
                 if (_pressTarget == Target.Handle && !_menuTriggered && dy > 60f * _scale)
                 {
                     _menuTriggered = true;
@@ -644,11 +831,23 @@ public sealed class RotomHomePage : ContentPage
             case SKTouchAction.Released:
                 args.Handled = true;
                 _holdTimer?.Stop();
-                if (!_moved && !_holdFired) OnTap(_pressTarget);
+                if (_pressItem >= 0)
+                {
+                    var item = _items[_pressItem];
+                    _pressItem = -1;
+                    _bottom.InvalidateSurface();
+                    if (!_moved && item.Action is { } action)
+                    {
+                        try { HapticFeedback.Default.Perform(HapticFeedbackType.Click); } catch (Exception) { /* no vibrator */ }
+                        _ = RunMenuActionAsync(action);
+                    }
+                }
+                else if (!_moved && !_holdFired) OnTap(_pressTarget);
                 _pressTarget = Target.None;
                 break;
             case SKTouchAction.Cancelled:
                 _holdTimer?.Stop();
+                if (_pressItem >= 0) { _pressItem = -1; _bottom.InvalidateSurface(); }
                 _pressTarget = Target.None;
                 break;
         }
@@ -766,71 +965,48 @@ public sealed class RotomHomePage : ContentPage
         await Navigation.PushAsync(services.GetRequiredService<TPage>());
     }
 
-    private Grid BuildMenu()
+    private async Task OpenOldHomeAsync(HomeStartAction action)
     {
-        var panel = _menuPanel;
-        panel.BackgroundColor = Colors.White;
-        panel.Stroke = Colors.Transparent;
-        panel.StrokeShape = new Microsoft.Maui.Controls.Shapes.RoundRectangle { CornerRadius = new CornerRadius(0, 0, 36, 36) };
-        panel.Padding = new Thickness(24, 56, 24, 28);
-        panel.VerticalOptions = LayoutOptions.Start;
-
-        var stack = new VerticalStackLayout { Spacing = 12 };
-        stack.Add(MenuButton("Profil", () => OpenAsync<RotomProfilePage>()));
-        stack.Add(MenuButton("Banque", () => OpenAsync<BankPage>()));
-        stack.Add(MenuButton("Jeux et sauvegardes", () => OpenAsync<HomePage>()));
-        stack.Add(new Label
-        {
-            Text = "Les autres écrans arrivent bientôt.",
-            TextColor = Color.FromArgb("#7a7b76"),
-            FontFamily = "RotomUI",
-            FontSize = 14,
-            HorizontalTextAlignment = TextAlignment.Center,
-        });
-        panel.Content = stack;
-        panel.TranslationY = -1200;
-
-        var shade = new BoxView { Color = Color.FromArgb("#66000000") };
-        shade.GestureRecognizers.Add(new TapGestureRecognizer { Command = new Command(() => _ = CloseMenuAsync()) });
-        var grid = new Grid { IsVisible = false };
-        grid.Add(shade);
-        grid.Add(panel);
-        return grid;
+        var services = IPlatformApplication.Current?.Services ?? throw new InvalidOperationException("MAUI services are unavailable.");
+        var page = services.GetRequiredService<HomePage>();
+        page.StartAction = action;
+        await Navigation.PushAsync(page);
     }
 
-    private Button MenuButton(string text, Func<Task> action)
+    private async Task RunMenuActionAsync(Func<Task> action)
     {
-        var button = new Button
-        {
-            Text = text,
-            FontFamily = "RotomUI",
-            FontSize = 20,
-            TextColor = Colors.White,
-            BackgroundColor = Color.FromArgb("#ee2b25"),
-            CornerRadius = 22,
-            HeightRequest = 56,
-        };
-        button.Clicked += async (_, _) =>
-        {
-            await CloseMenuAsync();
-            await action();
-        };
-        return button;
+        if (_navigating) return;
+        _navigating = true;
+        try { await action(); }
+        catch (Exception error) { Services.AppLog.Warn("rotom", $"Menu action failed: {error.Message}"); }
+        finally { _navigating = false; }
+    }
+
+    private Task AnimateMenuAsync(float to, uint length, Easing easing)
+    {
+        this.AbortAnimation("rotomMenu");
+        var done = new TaskCompletionSource();
+        new Animation(v => { _menuProgress = (float)v; InvalidateAll(); }, _menuProgress, to, easing)
+            .Commit(this, "rotomMenu", 16, length, finished: (_, _) => done.TrySetResult());
+        return done.Task;
     }
 
     private async Task OpenMenuAsync()
     {
         if (_menuOpen) return;
         _menuOpen = true;
-        _menu.IsVisible = true;
-        await _menuPanel.TranslateToAsync(0, 0, 220, Easing.CubicOut);
+        _bubbleUntil = 0;
+        _holdTimer?.Stop();
+        // Build the picture before sliding so the animation itself stays smooth.
+        EnsureMenuCache();
+        await AnimateMenuAsync(1f, 260, Easing.CubicOut);
     }
 
     private async Task CloseMenuAsync()
     {
         if (!_menuOpen) return;
         _menuOpen = false;
-        await _menuPanel.TranslateToAsync(0, -1200, 200, Easing.CubicIn);
-        _menu.IsVisible = false;
+        _pressItem = -1;
+        await AnimateMenuAsync(0f, 220, Easing.CubicIn);
     }
 }
