@@ -10,8 +10,14 @@ namespace PKForge.App.Views;
 /// The console home: a horizontal shelf of game cartridges, a first-run wizard when
 /// nothing is linked, and a bottom hint bar. Landscape composition for the AYN Thor.
 /// </summary>
+public enum HomeStartAction { None, Park, Autopilot, Events, Settings }
+
 public sealed class HomePage : ContentPage, IPadHandler
 {
+    /// <summary>Set by the Rotom menu: do this one thing as soon as the page shows, then go back to Rotom.</summary>
+    public HomeStartAction StartAction { get; set; }
+    private bool _leaveOnNextAppearing;
+
     private readonly SavePickerViewModel _viewModel;
     private ScrollView _shelf = null!;
     private HorizontalStackLayout _shelfItems = null!;
@@ -214,6 +220,18 @@ public sealed class HomePage : ContentPage, IPadHandler
     protected override void OnAppearing()
     {
         base.OnAppearing();
+        if (_leaveOnNextAppearing)
+        {
+            _leaveOnNextAppearing = false;
+            Dispatcher.Dispatch(async () => await Navigation.PopAsync());
+            return;
+        }
+        if (StartAction != HomeStartAction.None)
+        {
+            var action = StartAction;
+            StartAction = HomeStartAction.None;
+            Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(250), () => _ = RunStartActionAsync(action));
+        }
         _isAppearing = true;
         if (!_crashOffered)
         {
@@ -1287,6 +1305,30 @@ public sealed class HomePage : ContentPage, IPadHandler
         }
         else if (_viewModel.Status.StartsWith("Could not", StringComparison.Ordinal))
             await PadMenu.ShowAsync(_hostGrid, "Save could not open", _viewModel.Status, "OK");
+    }
+
+    /// <summary>Runs the one thing the Rotom menu asked for, then returns to the Rotom page.</summary>
+    private async Task RunStartActionAsync(HomeStartAction action)
+    {
+        try
+        {
+            switch (action)
+            {
+                case HomeStartAction.Park:
+                    // The Park is a page: coming back from it, this page leaves as well.
+                    _leaveOnNextAppearing = true;
+                    await PushParkAsync();
+                    return;
+                case HomeStartAction.Autopilot: await OpenAutopilotAsync(); break;
+                case HomeStartAction.Events: await ShowEventsMenuAsync(); break;
+                case HomeStartAction.Settings: await ShowSettingsAsync(); break;
+            }
+        }
+        catch (Exception error)
+        {
+            AppLog.Warn("rotom", $"Menu action {action} failed: {error.Message}");
+        }
+        await Navigation.PopAsync();
     }
 
     private async Task PushAsync<TPage>() where TPage : Page

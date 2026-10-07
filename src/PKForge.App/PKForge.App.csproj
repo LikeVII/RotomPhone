@@ -80,6 +80,7 @@
     <MauiAsset Include="Resources/RotomPhone/types/*.png" LogicalName="rotomphone/types/%(Filename)%(Extension)" />
     <MauiAsset Include="Resources/RotomPhone/trainers/*.png" LogicalName="rotomphone/trainers/%(Filename)%(Extension)" />
     <MauiAsset Include="Resources/RotomPhone/intro/*.png" LogicalName="rotomphone/intro/%(Filename)%(Extension)" />
+    <MauiAsset Include="Resources/RotomPhone/menu/*.png" LogicalName="rotomphone/menu/%(Filename)%(Extension)" />
     <MauiAsset Include="Resources/RotomPhone/rive/*.riv" LogicalName="%(Filename)%(Extension)" />
   </ItemGroup>
   <ItemGroup>

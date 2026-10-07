@@ -33,6 +33,8 @@ public static class RotomAssets
             yield return $"rotomphone/rotom/{n}.png";
         foreach (var t in TypeNames) yield return $"rotomphone/types/type_{t}.png";
         yield return "rotomphone/trainers/trainer_default.png";
+        foreach (var n in new[] { "menu_panel", "btn_blank", "btn_pokedex", "btn_pokemon", "btn_shiny_collection", "btn_teams" })
+            yield return $"rotomphone/menu/{n}.png";
     }
 
     private static void Load(string name)
