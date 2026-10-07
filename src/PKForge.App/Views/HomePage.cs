@@ -588,7 +588,6 @@ public sealed class HomePage : ContentPage, IPadHandler
         [
             new PadOption("Restore points", IconPath: "history"),
             new PadOption("About PKForge", IconPath: "info"),
-            new PadOption("Check for update", IconPath: "update"),
             new PadOption("Music", IconPath: "music"),
             new PadOption("Misc", IconPath: "gears"),
             new PadOption("Quit PKForge", IconPath: "quit"),
@@ -602,7 +601,6 @@ public sealed class HomePage : ContentPage, IPadHandler
             case "Open a save file": await LinkFileAsync(); break;
             case "Restore points": await PushAsync<BackupHistoryPage>(); break;
             case "About PKForge": await AboutPopup.ShowAsync(_hostGrid); break;
-            case "Check for update": await CheckForUpdateAsync(automatic: false); break;
             case "Music": await ShowMusicAsync(); break;
             case "Misc": await ShowMiscAsync(); break;
             case "Quit PKForge":
@@ -680,9 +678,13 @@ public sealed class HomePage : ContentPage, IPadHandler
         await _viewModel.RescanCommand.ExecuteAsync(null);
     }
 
+    private static readonly bool OriginalUpdatesEnabled = false;
+
     /// <summary>Release checks: automatic failures stay quiet, manual failures explain themselves.</summary>
     private async Task CheckForUpdateAsync(bool automatic)
     {
+        // Rotom Phone is its own app: the original PKForge releases must never be offered as updates.
+        if (!OriginalUpdatesEnabled) return;
         var service = IPlatformApplication.Current?.Services.GetService<AppUpdateService>();
         if (service is null) return;
 
