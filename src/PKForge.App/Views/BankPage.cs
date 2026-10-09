@@ -35,6 +35,12 @@ public sealed class BankPage : ContentPage, IPadPagingHandler
     private Label _pageLabel = null!;
     private Label _statusLine = null!;
 
+    /// <summary>
+    /// When set, the Bank is a picker: touching a Pokémon hands it to this action and leaves the page
+    /// (the Rotom profile uses it to fill its team).
+    /// </summary>
+    public Action<BankEntry>? PickHandler { get; set; }
+
     private int _boxIndex;
     private int _selectedSlot;
     private Guid? _carryId;
@@ -538,6 +544,11 @@ public sealed class BankPage : ContentPage, IPadPagingHandler
     /// mon under the cursor. The same words reach the shared status the boxes show.</summary>
     private void UpdateStatus()
     {
+        if (PickHandler is not null)
+        {
+            _boxViewModel.Status = "Touche un Pokémon pour le placer dans l'équipe";
+            return;
+        }
         if (_marked.Count > 0)
         {
             _boxViewModel.Status = $"{_marked.Count} marked · X actions · B clears";
@@ -1971,6 +1982,18 @@ public sealed class BankPage : ContentPage, IPadPagingHandler
 
         var slot = BoxGridRenderer.SlotFromTouch(_boxArea.Size, new SKPoint(args.Location.X - _boxArea.Left, args.Location.Y - _boxArea.Top));
         if (slot < 0) return;
+
+        if (PickHandler is { } pick)
+        {
+            // Picker mode: one touch on a Pokémon chooses it and goes back.
+            if (EntryAt(slot) is { } chosen)
+            {
+                PickHandler = null;
+                pick(chosen);
+                _ = Navigation.PopAsync();
+            }
+            return;
+        }
 
         var wasSelected = _selectedSlot == slot;
         _selectedSlot = slot;
