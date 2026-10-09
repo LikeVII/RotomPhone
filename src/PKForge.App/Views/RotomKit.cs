@@ -17,6 +17,16 @@ public static class RotomAssets
     /// <summary>The picture for a bundled logical name, or null when it is missing / still loading.</summary>
     public static SKImage? Get(string logicalName) => Cache.TryGetValue(logicalName, out var image) ? image : null;
 
+    /// <summary>Decodes the given pictures (those not loaded yet) off the UI thread.</summary>
+    public static Task WarmAsync(IEnumerable<string> names)
+    {
+        var list = names.ToArray();
+        return Task.Run(() =>
+        {
+            foreach (var name in list) Load(name);
+        });
+    }
+
     /// <summary>Decodes every home-screen picture off the UI thread.</summary>
     public static Task WarmAsync() => Task.Run(() =>
     {
