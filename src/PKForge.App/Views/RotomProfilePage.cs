@@ -61,7 +61,7 @@ public sealed class RotomProfilePage : ContentPage
         _bank = bank;
         _sprites = sprites;
         _profiles = profiles;
-        BackgroundColor = Teal;
+        BackgroundColor = Color.FromArgb("#006e72");
         NavigationPage.SetHasNavigationBar(this, false);
 
         // The stack of blocks under the section bar, 15 units apart (as in the design).
