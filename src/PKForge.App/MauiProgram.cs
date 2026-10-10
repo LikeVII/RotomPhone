@@ -106,6 +106,7 @@ public static class MauiProgram
         builder.Services.AddTransient<RotomHomePage>();
         builder.Services.AddTransient<RotomIntroPage>();
         builder.Services.AddTransient<RotomProfilePage>();
+        builder.Services.AddSingleton<SaveLibrary>();
         builder.Services.AddTransient<SecondScreenBoxPage>();
         builder.Services.AddTransient<BankPage>();
         App.Trace("builder.Build()");

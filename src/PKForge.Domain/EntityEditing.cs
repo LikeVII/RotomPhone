@@ -157,6 +157,10 @@ public interface ISaveEngineSession : IDisposable
 
     // ── Pokédex ──
     DexProgress GetDexProgress();
+
+    /// <summary>The trainer's identity and Pokédex marks, read once (the Rotom save library keeps them).
+    /// Null for sessions that cannot provide them.</summary>
+    SaveFacts? ReadFacts() => null;
     /// <summary>Marks every species seen and caught (complete dex).</summary>
     void CompleteDex();
 
@@ -607,6 +611,9 @@ public interface IGenerationOwnershipSettings
 }
 
 public sealed record DexProgress(int Seen, int Caught, int Total);
+
+/// <summary>What a save says about its trainer: identity, play time and which species are seen / caught.</summary>
+public sealed record SaveFacts(string Trainer, int TID, int SID, string PlayTime, int Generation, IReadOnlyList<int> Caught, IReadOnlyList<int> Seen);
 
 public sealed record DexEntryState(bool Seen, bool Caught);
 

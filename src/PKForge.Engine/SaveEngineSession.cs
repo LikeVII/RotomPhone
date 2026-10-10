@@ -1560,6 +1560,19 @@ public sealed class SaveEngineSession : ISaveEngineSession
         _ => true,
     };
 
+    public SaveFacts? ReadFacts()
+    {
+        ThrowIfDisposed();
+        var seen = new List<int>();
+        var caught = new List<int>();
+        for (ushort species = 1; species <= _save.MaxSpeciesID; species++)
+        {
+            if (_save.GetSeen(species)) seen.Add(species);
+            if (_save.GetCaught(species)) caught.Add(species);
+        }
+        return new SaveFacts(_save.OT, _save.TID16, _save.SID16, _save.PlayTimeString, _save.Generation, caught, seen);
+    }
+
     public DexProgress GetDexProgress()
     {
         ThrowIfDisposed();

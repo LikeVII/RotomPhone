@@ -151,7 +151,7 @@ public static class ProfileStats
     /// The full numbers: each Pokémon's origin game decides which regional Pokédex it fills.
     /// Reads every stored Pokémon once (remembered afterwards), so it runs off the UI thread.
     /// </summary>
-    public static ProfileData Deep(IBankService bank, IReadOnlyList<BankEntry> all, string name)
+    public static ProfileData Deep(IBankService bank, IReadOnlyList<BankEntry> all, string name, Services.SaveLibrary? library = null)
     {
         var sets = ProfileCatalog.Regions.ToDictionary(r => r.Id, _ => new HashSet<int>());
         var go = new HashSet<int>();
@@ -171,7 +171,28 @@ public static class ProfileStats
             if (ProfileCatalog.InDex(origin.Region, entry.Info.Species)) sets[origin.Region].Add(entry.Info.Species);
         }
         var quick = Quick(all, name);
-        return quick with { RegionCaught = sets.ToDictionary(p => p.Key, p => p.Value.Count), GoCaught = go.Count, OwnedGames = games };
+        var national = all.Select(e => e.Info.Species).Where(s => s > 0).ToHashSet();
+        if (library is not null)
+        {
+            // Imported saves: every game that has a save counts as owned; the Pokédex of each game's prime save adds to its region.
+            foreach (var save in library.All)
+            {
+                games.Add($"{save.Region}/{save.Game}");
+                if (!save.IsPrime || !sets.TryGetValue(save.Region, out var regionSet)) continue;
+                foreach (var species in save.Caught)
+                {
+                    national.Add(species);
+                    if (ProfileCatalog.InDex(save.Region, species)) regionSet.Add(species);
+                }
+            }
+        }
+        return quick with
+        {
+            NationalCaught = national.Count,
+            RegionCaught = sets.ToDictionary(p => p.Key, p => p.Value.Count),
+            GoCaught = go.Count,
+            OwnedGames = games,
+        };
     }
 
     private static int VersionOf(IBankService bank, BankEntry entry)
