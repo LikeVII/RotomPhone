@@ -1560,6 +1560,49 @@ public sealed class SaveEngineSession : ISaveEngineSession
         _ => true,
     };
 
+    /// <summary>
+    /// The gym badges the player owns, as "region/NN" (the numbering of the profile pictures: Kanto 01 = Boulder).
+    /// Only the games whose badges are stored in a plain place are read; the others give none.
+    /// </summary>
+    private List<string> ReadBadges()
+    {
+        var owned = new List<string>();
+        void Bits(string region, int mask, params int[]? numbers)
+        {
+            for (var bit = 0; bit < 8; bit++)
+                if ((mask & (1 << bit)) != 0)
+                    owned.Add($"{region}/{(numbers is { Length: > 0 } ? numbers[bit] : bit + 1):00}");
+        }
+        try
+        {
+            switch (_save)
+            {
+                case SAV1 sav1: Bits("kanto", sav1.Badges); break;
+                case SAV2 sav2:
+                    Bits("johto", sav2.Badges & 0xFF);
+                    Bits("kanto", (sav2.Badges >> 8) & 0xFF);
+                    break;
+                case SAV3FRLG frlg: Bits("kanto", frlg.Badges); break;
+                case SAV3 sav3 when sav3 is SAV3RS or SAV3E: Bits("hoenn", sav3.Badges); break;
+                case SAV4HGSS hgss:
+                    Bits("johto", hgss.Badges);
+                    Bits("kanto", hgss.Badges16);
+                    break;
+                case SAV4Sinnoh sinnoh: Bits("sinnoh", sinnoh.Badges); break;
+                // Black / White: the eight gyms in order. Black 2 / White 2 swap two of them for the new Toxic and Wave badges.
+                case SAV5BW bw: Bits("unys", bw.Misc.Badges); break;
+                case SAV5B2W2 b2w2: Bits("unys", b2w2.Misc.Badges, 2, 9, 3, 4, 5, 6, 10, 8); break;
+                case SAV6XY xy: Bits("kalos", xy.Badges); break;
+                case SAV6AO ao: Bits("hoenn", ao.Badges); break;
+            }
+        }
+        catch (Exception)
+        {
+            owned.Clear();
+        }
+        return owned;
+    }
+
     public SaveFacts? ReadFacts()
     {
         ThrowIfDisposed();
@@ -1570,7 +1613,7 @@ public sealed class SaveEngineSession : ISaveEngineSession
             if (_save.GetSeen(species)) seen.Add(species);
             if (_save.GetCaught(species)) caught.Add(species);
         }
-        return new SaveFacts(_save.OT, _save.TID16, _save.SID16, _save.PlayTimeString, _save.Generation, caught, seen);
+        return new SaveFacts(_save.OT, _save.TID16, _save.SID16, _save.PlayTimeString, _save.Generation, caught, seen, ReadBadges());
     }
 
     public DexProgress GetDexProgress()

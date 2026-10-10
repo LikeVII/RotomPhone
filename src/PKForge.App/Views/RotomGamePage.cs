@@ -124,7 +124,7 @@ public sealed class RotomGamePage : ContentPage
                 Text($"Temps de jeu : {save.PlayTime}", 16, Pill),
                 Text($"{_region.Title} : {regionCaught}/{ProfileCatalog.Total(_game.Region)}", 16, Pill),
                 Text($"Pokémon capturés : {save.Caught.Length}  ·  vus : {save.Seen.Length}", 16, Pill),
-                Text("Badges : bientôt", 16, Beige),
+                Text(BadgeLine(save), 16, Beige),
                 Text($"Mise à jour le {save.UpdatedUtc.ToLocalTime():dd/MM/yyyy HH:mm}", 13, Beige),
             },
         };
@@ -151,6 +151,13 @@ public sealed class RotomGamePage : ContentPage
         };
         card.GestureRecognizers.Add(new TapGestureRecognizer { Command = new Command(async () => await OpenActionsAsync(save)) });
         return card;
+    }
+
+    private string BadgeLine(SaveEntry save)
+    {
+        if (!ProfileCatalog.BadgesReadable(_game.Region, _game.Game)) return "Badges : pas encore lus pour ce jeu";
+        var count = (save.Badges ?? []).Count(b => b.StartsWith(_game.Region + "/", StringComparison.Ordinal));
+        return $"Badges : {count}/{_region.Badges.Length}";
     }
 
     private async Task OpenActionsAsync(SaveEntry save)

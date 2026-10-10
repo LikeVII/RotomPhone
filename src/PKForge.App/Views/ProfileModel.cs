@@ -85,6 +85,18 @@ public static class ProfileCatalog
         };
     }
 
+    /// <summary>
+    /// Whether the badges of a game can be read from its save. Alola, Galar, Hisui and Paldea keep them in
+    /// game-event data that is not read yet; Let's Go and the Sinnoh remakes are not read either.
+    /// </summary>
+    public static bool BadgesReadable(string region, string game) => region switch
+    {
+        "kanto" => game is not ("letsgo_pikachu" or "letsgo_eevee"),
+        "johto" or "hoenn" or "unys" or "kalos" => true,
+        "sinnoh" => game is not ("brilliantdiamond" or "shiningpearl"),
+        _ => false,
+    };
+
     /// <summary>How many species a region's Pokédex holds.</summary>
     public static int Total(string region)
     {
@@ -172,12 +184,15 @@ public static class ProfileStats
         }
         var quick = Quick(all, name);
         var national = all.Select(e => e.Info.Species).Where(s => s > 0).ToHashSet();
+        var badges = new HashSet<string>();
         if (library is not null)
         {
             // Imported saves: every game that has a save counts as owned; the Pokédex of each game's prime save adds to its region.
             foreach (var save in library.All)
             {
                 games.Add($"{save.Region}/{save.Game}");
+                if (save.IsPrime && save.Badges is { } earned)
+                    foreach (var badge in earned) badges.Add(badge);
                 if (!save.IsPrime || !sets.TryGetValue(save.Region, out var regionSet)) continue;
                 foreach (var species in save.Caught)
                 {
@@ -192,6 +207,7 @@ public static class ProfileStats
             RegionCaught = sets.ToDictionary(p => p.Key, p => p.Value.Count),
             GoCaught = go.Count,
             OwnedGames = games,
+            OwnedBadges = badges,
         };
     }
 
