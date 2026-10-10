@@ -191,8 +191,11 @@ public static class ProfileStats
             foreach (var save in library.All)
             {
                 games.Add($"{save.Region}/{save.Game}");
+                // A save lights only the badges of its own region: Johto games never light Kanto's, even
+                // when a copy stored earlier still lists them.
                 if (save.IsPrime && save.Badges is { } earned)
-                    foreach (var badge in earned) badges.Add(badge);
+                    foreach (var badge in earned)
+                        if (badge.StartsWith(save.Region + "/", StringComparison.Ordinal)) badges.Add(badge);
                 if (!save.IsPrime || !sets.TryGetValue(save.Region, out var regionSet)) continue;
                 foreach (var species in save.Caught)
                 {

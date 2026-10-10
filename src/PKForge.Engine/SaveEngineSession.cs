@@ -1578,16 +1578,12 @@ public sealed class SaveEngineSession : ISaveEngineSession
             switch (_save)
             {
                 case SAV1 sav1: Bits("kanto", sav1.Badges); break;
-                case SAV2 sav2:
-                    Bits("johto", sav2.Badges & 0xFF);
-                    Bits("kanto", (sav2.Badges >> 8) & 0xFF);
-                    break;
+                // Gold / Silver / Crystal and HeartGold / SoulSilver also hold the Kanto badges, but they are
+                // earned in Johto games, so they are not read: Kanto's badges come only from Kanto games.
+                case SAV2 sav2: Bits("johto", sav2.Badges & 0xFF); break;
                 case SAV3FRLG frlg: Bits("kanto", frlg.Badges); break;
                 case SAV3 sav3 when sav3 is SAV3RS or SAV3E: Bits("hoenn", sav3.Badges); break;
-                case SAV4HGSS hgss:
-                    Bits("johto", hgss.Badges);
-                    Bits("kanto", hgss.Badges16);
-                    break;
+                case SAV4HGSS hgss: Bits("johto", hgss.Badges); break;
                 case SAV4Sinnoh sinnoh: Bits("sinnoh", sinnoh.Badges); break;
                 // Black / White: the eight gyms in order. Black 2 / White 2 swap two of them for the new Toxic and Wave badges.
                 case SAV5BW bw: Bits("unys", bw.Misc.Badges); break;
