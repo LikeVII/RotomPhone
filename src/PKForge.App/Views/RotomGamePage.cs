@@ -158,8 +158,8 @@ public sealed class RotomGamePage : ContentPage
         var prime = "Définir comme sauvegarde principale";
         var delete = "Supprimer cette sauvegarde";
         var choice = save.IsPrime
-            ? await DisplayActionSheet(save.Trainer, "Annuler", delete)
-            : await DisplayActionSheet(save.Trainer, "Annuler", delete, prime);
+            ? await DisplayActionSheetAsync(save.Trainer, "Annuler", delete)
+            : await DisplayActionSheetAsync(save.Trainer, "Annuler", delete, prime);
         if (choice == prime)
         {
             _library.SetPrime(save.Id);
@@ -167,7 +167,7 @@ public sealed class RotomGamePage : ContentPage
         }
         else if (choice == delete)
         {
-            var confirmed = await DisplayAlert("Supprimer ?",
+            var confirmed = await DisplayAlertAsync("Supprimer ?",
                 $"La copie de la sauvegarde de {save.Trainer} sera supprimée de Rotom Phone. Le fichier d'origine n'est pas touché.", "Supprimer", "Annuler");
             if (!confirmed) return;
             _library.Delete(save.Id);
@@ -192,7 +192,7 @@ public sealed class RotomGamePage : ContentPage
                 var guess = SaveGames.Resolve(described.GameName);
                 if (guess.Count > 0 && !guess.Contains((_game.Region, _game.Game)))
                 {
-                    var go = await DisplayAlert("Un autre jeu ?",
+                    var go = await DisplayAlertAsync("Un autre jeu ?",
                         $"Cette sauvegarde ressemble à « {described.GameName} ». L'importer dans {GameName} quand même ?", "Importer", "Annuler");
                     if (!go) return;
                 }
@@ -206,12 +206,12 @@ public sealed class RotomGamePage : ContentPage
                 : result.Entry.IsPrime
                     ? $"La sauvegarde de {result.Entry.Trainer} est ajoutée et devient la sauvegarde principale de {GameName}."
                     : $"La sauvegarde de {result.Entry.Trainer} est ajoutée. La sauvegarde principale de {GameName} ne change pas.";
-            await DisplayAlert("Importation terminée", message, "OK");
+            await DisplayAlertAsync("Importation terminée", message, "OK");
         }
         catch (Exception error)
         {
             AppLog.Warn("saves", $"Import failed: {error.Message}");
-            await DisplayAlert("Importation impossible", "Cette sauvegarde n'a pas pu être lue.", "OK");
+            await DisplayAlertAsync("Importation impossible", "Cette sauvegarde n'a pas pu être lue.", "OK");
         }
         finally
         {
