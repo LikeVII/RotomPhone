@@ -31,6 +31,7 @@ public sealed class RotomProfilePage : ContentPage
     private readonly IBankService _bank;
     private readonly ISpriteService _sprites;
     private readonly TrainerProfileStore _profiles;
+    private readonly SaveLibrary _library;
     private readonly SKCanvasView _canvas;
     private readonly List<Block> _blocks = [];
     private readonly float _panelBottom;
@@ -40,6 +41,8 @@ public sealed class RotomProfilePage : ContentPage
     private ProfileData _data = new("Dresseur", "Dresseur", 0, 0, new Dictionary<string, int>(), 0, [], []);
     private IReadOnlyList<BankEntry> _all = [];
     private readonly Guid?[] _team = new Guid?[6];
+    // The games drawn on the last frame (design units), so a tap on one opens its saves.
+    private readonly List<(SKRect Rect, string Region, string Game)> _gameHits = [];
 
     // Scrolling
     private float _scale = 1f, _scrollY, _viewH;
@@ -56,8 +59,9 @@ public sealed class RotomProfilePage : ContentPage
     private string _backgroundKey = "";
     private readonly Dictionary<Guid, (SKBitmap Source, SKImage Image, int Size)> _teamImages = new();
 
-    public RotomProfilePage(IBankService bank, ISpriteService sprites, TrainerProfileStore profiles)
+    public RotomProfilePage(IBankService bank, ISpriteService sprites, TrainerProfileStore profiles, SaveLibrary library)
     {
+        _library = library;
         _bank = bank;
         _sprites = sprites;
         _profiles = profiles;
@@ -111,7 +115,7 @@ public sealed class RotomProfilePage : ContentPage
         _canvas.InvalidateSurface();
 
         var all = _all;
-        _ = Task.Run(() => ProfileStats.Deep(_bank, all, name)).ContinueWith(t =>
+        _ = Task.Run(() => ProfileStats.Deep(_bank, all, name, _library)).ContinueWith(t =>
             MainThread.BeginInvokeOnMainThread(() =>
             {
                 if (t.Status != TaskStatus.RanToCompletion) return;
@@ -174,6 +178,7 @@ public sealed class RotomProfilePage : ContentPage
 
         c.Clear(Teal);
         DrawBackground(c, e.Info);
+        _gameHits.Clear();
 
         c.Save();
         c.Translate(0, -_scrollY);
@@ -405,7 +410,9 @@ public sealed class RotomProfilePage : ContentPage
         foreach (var game in region.Games)
         {
             var owned = _data.OwnedGames.Contains($"{region.Id}/{game.Id}");
-            DrawImageFit(c, ProfileCatalog.GameAsset(region.Id, game.Id), new SKRect(x, block.Top + 18, x + 128, block.Top + 146), owned ? 1f : 0.4f);
+            var gameRect = new SKRect(x, block.Top + 18, x + 128, block.Top + 146);
+            _gameHits.Add((gameRect, region.Id, game.Id));
+            DrawImageFit(c, ProfileCatalog.GameAsset(region.Id, game.Id), gameRect, owned ? 1f : 0.4f);
             x += 128f + gap;
         }
 
@@ -498,6 +505,20 @@ public sealed class RotomProfilePage : ContentPage
         return -1;
     }
 
+    private (string Region, string Game)? GameAt(SKPoint p)
+    {
+        var point = new SKPoint(p.X / _scale, (p.Y + _scrollY) / _scale);
+        foreach (var (rect, region, game) in _gameHits)
+            if (rect.Contains(point)) return (region, game);
+        return null;
+    }
+
+    private async Task OpenGameAsync(string region, string game)
+    {
+        var services = IPlatformApplication.Current?.Services ?? throw new InvalidOperationException("MAUI services are unavailable.");
+        await Navigation.PushAsync(ActivatorUtilities.CreateInstance<RotomGamePage>(services, new ProfileGameRef(region, game)));
+    }
+
     private void OnTouch(object? sender, SKTouchEventArgs args)
     {
         switch (args.ActionType)
@@ -546,6 +567,7 @@ public sealed class RotomProfilePage : ContentPage
                     StartFling();
                 }
                 else if (!_holdFired && _pressSlot >= 0) _ = PickForSlotAsync(_pressSlot);
+                else if (!_holdFired && GameAt(args.Location) is { } game) _ = OpenGameAsync(game.Region, game.Game);
                 break;
             case SKTouchAction.Cancelled:
                 _holdTimer?.Stop();
