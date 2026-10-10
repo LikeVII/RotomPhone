@@ -6,7 +6,7 @@ namespace PKForge.App.Services;
 /// <summary>One imported save: who the trainer is, how far the game went, and where the copy of the file lives.</summary>
 public sealed record SaveEntry(
     Guid Id, string Region, string Game, string GameLabel, string Trainer, int TID, int SID, string PlayTime, int Generation,
-    int[] Caught, int[] Seen, bool IsPrime, DateTimeOffset ImportedUtc, DateTimeOffset UpdatedUtc, string SourceName)
+    int[] Caught, int[] Seen, bool IsPrime, DateTimeOffset ImportedUtc, DateTimeOffset UpdatedUtc, string SourceName, string[]? Badges = null)
 {
     /// <summary>The copy of the save file kept by the library.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
@@ -108,7 +108,37 @@ public sealed class SaveLibrary(ISaveEngine engine)
             AppLog.Warn("saves", $"The save library index could not be read: {error.Message}");
             _entries = [];
         }
+        BackfillBadges(_entries);
         return _entries;
+    }
+
+    /// <summary>Saves imported before badges were read get them from their stored copy, once.</summary>
+    private void BackfillBadges(List<SaveEntry> entries)
+    {
+        var changed = false;
+        for (var i = 0; i < entries.Count; i++)
+        {
+            if (entries[i].Badges is not null) continue;
+            string[] badges = [];
+            try
+            {
+                var path = Path.Combine(Folder, entries[i].FileName);
+                if (File.Exists(path))
+                {
+                    using var session = engine.OpenSession(File.ReadAllBytes(path), null);
+                    badges = [.. session.ReadFacts()?.Badges ?? []];
+                }
+            }
+            catch (Exception error)
+            {
+                AppLog.Warn("saves", $"Could not read the badges of a stored save: {error.Message}");
+            }
+            entries[i] = entries[i] with { Badges = badges };
+            changed = true;
+        }
+        if (!changed) return;
+        try { Persist(); }
+        catch (Exception error) { AppLog.Warn("saves", $"Could not store the badges: {error.Message}"); }
     }
 
     private void Persist()
@@ -134,7 +164,7 @@ public sealed class SaveLibrary(ISaveEngine engine)
             var entry = new SaveEntry(id, region, game, gameLabel, facts.Trainer, facts.TID, facts.SID, facts.PlayTime, facts.Generation,
                 [.. facts.Caught], [.. facts.Seen],
                 known?.IsPrime ?? !entries.Any(e => e.Region == region && e.Game == game),
-                known?.ImportedUtc ?? now, now, sourceName);
+                known?.ImportedUtc ?? now, now, sourceName, [.. facts.Badges ?? []]);
             Directory.CreateDirectory(Folder);
             File.WriteAllBytes(Path.Combine(Folder, entry.FileName), bytes.ToArray());
             if (known is null) entries.Add(entry);

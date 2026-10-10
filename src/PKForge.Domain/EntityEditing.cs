@@ -613,7 +613,8 @@ public interface IGenerationOwnershipSettings
 public sealed record DexProgress(int Seen, int Caught, int Total);
 
 /// <summary>What a save says about its trainer: identity, play time and which species are seen / caught.</summary>
-public sealed record SaveFacts(string Trainer, int TID, int SID, string PlayTime, int Generation, IReadOnlyList<int> Caught, IReadOnlyList<int> Seen);
+public sealed record SaveFacts(string Trainer, int TID, int SID, string PlayTime, int Generation, IReadOnlyList<int> Caught, IReadOnlyList<int> Seen,
+    IReadOnlyList<string>? Badges = null);
 
 public sealed record DexEntryState(bool Seen, bool Caught);
 
