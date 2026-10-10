@@ -1,4 +1,5 @@
 using PKForge.App.Services;
+using PKForge.App.ViewModels;
 using PKForge.Domain;
 
 namespace PKForge.App.Views;
@@ -28,6 +29,7 @@ public sealed class RotomGamePage : ContentPage
     private readonly ProfileGame _profileGame;
     private readonly VerticalStackLayout _list = new() { Spacing = 14 };
     private bool _busy;
+    private Guid? _openedId;
 
     public RotomGamePage(ProfileGameRef game, SaveLibrary library, ISaveEngine engine, IDocumentPicker picker, ISaveFileAccess files)
     {
@@ -86,6 +88,12 @@ public sealed class RotomGamePage : ContentPage
     {
         base.OnAppearing();
         Rebuild();
+        // Back from the boxes of a save: its numbers may have changed, so they are read again.
+        if (_openedId is { } opened)
+        {
+            _openedId = null;
+            _ = Task.Run(() => _library.Refresh(opened)).ContinueWith(_ => MainThread.BeginInvokeOnMainThread(Rebuild));
+        }
     }
 
     private static Label Text(string text, double size, Color color, TextAlignment align = TextAlignment.Start, bool bold = false) => new()
@@ -162,12 +170,17 @@ public sealed class RotomGamePage : ContentPage
 
     private async Task OpenActionsAsync(SaveEntry save)
     {
+        var open = "Ouvrir les boîtes";
         var prime = "Définir comme sauvegarde principale";
         var delete = "Supprimer cette sauvegarde";
         var choice = save.IsPrime
-            ? await DisplayActionSheetAsync(save.Trainer, "Annuler", delete)
-            : await DisplayActionSheetAsync(save.Trainer, "Annuler", delete, prime);
-        if (choice == prime)
+            ? await DisplayActionSheetAsync(save.Trainer, "Annuler", delete, open)
+            : await DisplayActionSheetAsync(save.Trainer, "Annuler", delete, open, prime);
+        if (choice == open)
+        {
+            await OpenBoxesAsync(save);
+        }
+        else if (choice == prime)
         {
             _library.SetPrime(save.Id);
             Rebuild();
@@ -179,6 +192,42 @@ public sealed class RotomGamePage : ContentPage
             if (!confirmed) return;
             _library.Delete(save.Id);
             Rebuild();
+        }
+    }
+
+    /// <summary>
+    /// Opens the stored copy of a save in the box screen of PKForge. Writes there keep PKForge's own safety:
+    /// the file is checked and a restore point is made before each change. Only the copy kept by the app
+    /// changes; the original file, wherever it came from, is never touched.
+    /// </summary>
+    private async Task OpenBoxesAsync(SaveEntry save)
+    {
+        if (_busy) return;
+        if (save.IsPrime)
+        {
+            var go = await DisplayAlertAsync("Sauvegarde principale",
+                "Les changements faits ici comptent dans ton profil (Pokédex, jeux). Pour déplacer des Pokémon sans y toucher, utilise une autre sauvegarde de ce jeu. Ouvrir quand même ?",
+                "Ouvrir", "Annuler");
+            if (!go) return;
+        }
+        _busy = true;
+        try
+        {
+            var services = IPlatformApplication.Current?.Services ?? throw new InvalidOperationException("MAUI services are unavailable.");
+            var sessions = services.GetRequiredService<ISaveSessionService>();
+            await sessions.OpenAsync(new PickedDocument(LibrarySaveAccess.IdFor(save), save.EngineHint ?? save.SourceName));
+            services.GetRequiredService<BoxBrowserViewModel>().RefreshFromCurrentSession();
+            _openedId = save.Id;
+            await Navigation.PushAsync(services.GetRequiredService<BoxBrowserPage>());
+        }
+        catch (Exception error)
+        {
+            AppLog.Warn("saves", $"Opening the boxes of a stored save failed: {error.Message}");
+            await DisplayAlertAsync("Ouverture impossible", "Les boîtes de cette sauvegarde n'ont pas pu être ouvertes.", "OK");
+        }
+        finally
+        {
+            _busy = false;
         }
     }
 
