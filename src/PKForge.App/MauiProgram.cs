@@ -83,12 +83,15 @@ public static class MauiProgram
         builder.Services.AddSingleton<GamepadRouter>();
         builder.Services.AddSingleton<SecondScreenState>();
         builder.Services.AddSingleton<SpritePackDownloader>();
+        builder.Services.AddSingleton<CryPackDownloader>();
+        builder.Services.AddSingleton<CryService>();
         builder.Services.AddSingleton<AppUpdateService>();
         builder.Services.AddSingleton<TransferService>();
 #if ANDROID
         builder.Services.AddSingleton<ISaveFileAccess>(_ => new LibrarySaveAccess(new AndroidSafFileAccess()));
         builder.Services.AddSingleton<Platforms.Android.MusicPlayer>();
         builder.Services.AddSingleton<IMusicPlayer>(sp => sp.GetRequiredService<Platforms.Android.MusicPlayer>());
+        builder.Services.AddSingleton<ICryPlayer, Platforms.Android.CryPlayer>();
         builder.Services.AddSingleton<IDocumentPicker, AndroidDocumentPicker>();
         builder.Services.AddSingleton<ISecondaryDisplayHost, AndroidSecondaryDisplayHost>();
         builder.Services.AddSingleton<IFolderPicker, AndroidFolderPicker>();
