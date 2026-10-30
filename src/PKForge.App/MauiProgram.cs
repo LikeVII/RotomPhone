@@ -85,6 +85,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<SpritePackDownloader>();
         builder.Services.AddSingleton<CryPackDownloader>();
         builder.Services.AddSingleton<CryService>();
+        builder.Services.AddSingleton<ShinyStore>();
         builder.Services.AddSingleton<AppUpdateService>();
         builder.Services.AddSingleton<TransferService>();
 #if ANDROID
@@ -109,6 +110,7 @@ public static class MauiProgram
         builder.Services.AddTransient<RotomHomePage>();
         builder.Services.AddTransient<RotomIntroPage>();
         builder.Services.AddTransient<RotomProfilePage>();
+        builder.Services.AddTransient<ShinyHuntPage>();
         builder.Services.AddSingleton<SaveLibrary>();
         builder.Services.AddTransient<SecondScreenBoxPage>();
         builder.Services.AddTransient<BankPage>();
