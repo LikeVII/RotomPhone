@@ -111,7 +111,7 @@ public sealed class RotomHomePage : ContentPage
         [
             new("btn_pokedex", null, null),
             new("btn_pokemon", null, () => OpenAsync<BankPage>()),
-            new("btn_shiny_collection", null, null),
+            new("btn_shiny_collection", null, () => OpenAsync<ShinyHuntPage>()),
             new("btn_teams", null, null),
             new("btn_blank", ["Poképark"], () => OpenOldHomeAsync(HomeStartAction.Park)),
             new("btn_blank", ["Autopilote"], () => OpenOldHomeAsync(HomeStartAction.Autopilot)),
