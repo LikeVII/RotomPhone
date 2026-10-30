@@ -880,8 +880,12 @@ public sealed class RotomHomePage : ContentPage
             case Target.Profile: _ = OpenAsync<RotomProfilePage>(); break;
             case Target.NextMon: ShowAnotherPokemon(); break;
             case Target.Pokemon:
-                // The cry plays here once a cry source is chosen; for now a short tick tells the tap landed.
                 try { HapticFeedback.Default.Perform(HapticFeedbackType.Click); } catch (Exception) { /* no vibrator */ }
+                if (_entry is not null && IPlatformApplication.Current?.Services.GetService<CryService>() is { } cries)
+                {
+                    var look = _entry.Info.Look;
+                    _ = Task.Run(() => cries.PlayAsync(look));
+                }
                 break;
         }
     }

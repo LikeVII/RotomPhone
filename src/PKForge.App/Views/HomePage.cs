@@ -863,6 +863,7 @@ public sealed class HomePage : ContentPage, IPadHandler
                 ? "Generated Pokémon obey trainer: ON"
                 : "Generated Pokémon obey trainer: OFF", IconPath: "profile"),
             new PadOption($"Download full sprite pack ({SpritePackDownloader.SizeHint})", IconPath: "download"),
+            new PadOption($"Download all cries ({CryPackDownloader.SizeHint})", IconPath: "download"),
             new PadOption("Rescan games", IconPath: "refresh"),
             new PadOption("Scan report", IconPath: "report"),
             new PadOption("Share logs", IconPath: "export", Detail: "Crash reports and recent activity, to send us when something goes wrong."),
@@ -880,6 +881,9 @@ public sealed class HomePage : ContentPage, IPadHandler
                 break;
             case var pack when pack?.StartsWith("Download full sprite pack", StringComparison.Ordinal) == true:
                 await DownloadSpritePackAsync();
+                break;
+            case var cries when cries?.StartsWith("Download all cries", StringComparison.Ordinal) == true:
+                await DownloadCriesAsync();
                 break;
             case "Rescan games":
                 if (_viewModel.IsBusy && !_viewModel.ReleaseIfStuck())
@@ -1007,6 +1011,39 @@ public sealed class HomePage : ContentPage, IPadHandler
         catch (Exception error)
         {
             _viewModel.Status = $"Sprite pack stopped: {error.Message}";
+        }
+        finally
+        {
+            overlay.Close();
+        }
+    }
+
+    /// <summary>Downloads every Pokémon cry so they all play offline.</summary>
+    private async Task DownloadCriesAsync()
+    {
+        var downloader = IPlatformApplication.Current?.Services.GetService<CryPackDownloader>();
+        if (downloader is null) return;
+        if (await Task.Run(downloader.CountMissing) == 0)
+        {
+            await PadMenu.ShowAsync(_hostGrid, "Cries", "Already downloaded: every cry is on this device, so they all play offline.", "OK");
+            return;
+        }
+        var overlay = LoadingOverlay.Show(_hostGrid, "Collecting all the cries!",
+            "Downloading the cry of every Pokémon. You can cancel anytime; finished cries are kept and it resumes where it left off.");
+        try
+        {
+            var failed = await downloader.RunAsync(overlay.Report, overlay.Cancellation.Token);
+            _viewModel.Status = failed == 0
+                ? "All cries downloaded - they play offline now."
+                : $"{failed} cries could not be downloaded (check the connection); run it again to finish.";
+        }
+        catch (OperationCanceledException)
+        {
+            _viewModel.Status = "Cries paused - resume anytime from Settings.";
+        }
+        catch (Exception error)
+        {
+            _viewModel.Status = $"Cries stopped: {error.Message}";
         }
         finally
         {
